@@ -155,6 +155,7 @@ data:
     az aks get-credentials \
       --resource-group "$AKS_RESOURCE_GROUP" \
       --name "$AKS_CLUSTER_NAME" \
+      --file "$KUBECONFIG" \
       --overwrite-existing
 
     echo "Converting kubeconfig for workload identity..."
@@ -256,17 +257,20 @@ spec:
               mountPath: /etc/agent/policy.rego
               subPath: executor.rego
               readOnly: true # make sure the agent does not modify the policy file
+            - name: runtime-volume
+              mountPath: /etc/agent
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /health
               port: 8081
-            initialDelaySeconds: 30
+            initialDelaySeconds: 120
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /health
               port: 8081
-            initialDelaySeconds: 10
+            initialDelaySeconds: 90
             periodSeconds: 10
       imagePullSecrets:
         - name: acr-secret
@@ -274,6 +278,10 @@ spec:
         - name: policy-volume
           configMap:
             name: agent-policy
+        - name: runtime-volume
+          configMap:
+            name: agent-runtime
+            defaultMode: 0755
 ---
 # notesllm-agent Service
 apiVersion: v1
