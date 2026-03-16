@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir -e .
 COPY app/ ./app/
 COPY policies/ ./policies/
 
-CMD ["sh", "-c", "sh /etc/agent/install-tools.sh && exec sh /etc/agent/entrypoint.sh"]
+CMD ["sh", "/etc/agent/entrypoint.sh"]
