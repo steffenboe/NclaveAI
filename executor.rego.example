@@ -1,0 +1,47 @@
+package ops.agent
+
+role_commands := {
+    "INFRA_OBSERVER": [
+        ["kubectl", "get"],
+        ["kubectl", "logs"],
+        ["kubectl", "describe"],
+        ["helm", "list"],
+        ["helm", "status"],
+    ],
+    "INFRA_OPERATOR": [
+        ["kubectl", "get"],
+        ["kubectl", "logs"],
+        ["kubectl", "describe"],
+        ["kubectl", "rollout"],
+        ["kubectl", "scale"],
+        ["helm", "list"],
+        ["helm", "status"],
+        ["helm", "upgrade"],
+    ],
+}
+
+default allow = false
+
+# True when the command targets Kubernetes secret resources
+targets_secrets {
+    input.argv[_] = "secret"
+}
+
+targets_secrets {
+    input.argv[_] = "secrets"
+}
+
+# INFRA_OBSERVER is not permitted to read secrets
+observer_secrets_forbidden {
+    input.roles[_] = "INFRA_OBSERVER"
+    targets_secrets
+}
+
+allow {
+    not observer_secrets_forbidden
+    some role
+    some prefix
+    input.roles[_] = role
+    prefix = role_commands[role][_]
+    array.slice(input.argv, 0, count(prefix)) = prefix
+}

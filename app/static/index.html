@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OPS Agent - Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: ui-monospace, 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 32px 20px; }
+
+    header { margin-bottom: 28px; }
+    header h1 { font-size: 22px; color: #58a6ff; letter-spacing: -0.3px; }
+    header p  { color: #8b949e; font-size: 13px; margin-top: 4px; }
+
+    /* ── Query form ─────────────────────────────────── */
+    .query-box {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 28px;
+    }
+    textarea {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      padding: 10px 12px;
+      font-family: inherit;
+      font-size: 14px;
+      resize: vertical;
+      min-height: 76px;
+      transition: border-color 0.15s;
+    }
+    textarea:focus { outline: none; border-color: #58a6ff; }
+    textarea::placeholder { color: #484f58; }
+
+    .form-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+    .form-hint { color: #6e7681; font-size: 12px; }
+
+    button {
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 18px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: #2ea043; }
+    button:disabled { background: #21262d; color: #6e7681; cursor: not-allowed; }
+
+    /* ── Runs list header ───────────────────────────── */
+    .runs-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .runs-header h2 { font-size: 15px; color: #e6edf3; }
+    .badge {
+      background: #21262d;
+      border-radius: 20px;
+      padding: 1px 9px;
+      font-size: 12px;
+      color: #8b949e;
+    }
+
+    /* ── Run card ───────────────────────────────────── */
+    .run-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+
+    .run-summary {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .run-summary:hover { background: #1c2128; }
+
+    .status-pill {
+      flex-shrink: 0;
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .s-running       { background: #1f3a5f; color: #58a6ff; }
+    .s-done          { background: #1a3a2a; color: #3fb950; }
+    .s-failed        { background: #3d1f1f; color: #f85149; }
+    .s-policy_denied { background: #3d2f1f; color: #d29922; }
+
+    .run-prompt { flex: 1; color: #e6edf3; word-break: break-word; }
+    .run-meta   { flex-shrink: 0; color: #484f58; font-size: 12px; white-space: nowrap; }
+
+    .chevron { color: #6e7681; font-size: 11px; flex-shrink: 0; margin-top: 2px; }
+
+    .run-body { padding: 0 16px 16px; border-top: 1px solid #21262d; }
+    .run-body.collapsed { display: none; }
+
+    .section-label { color: #8b949e; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; margin: 12px 0 8px; }
+
+    /* ── Action row ─────────────────────────────────── */
+    .action-row {
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+    .action-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: #0d1117;
+    }
+    .action-cmd { flex: 1; color: #79c0ff; word-break: break-all; }
+    .action-cmd::before { content: "$ "; color: #484f58; }
+
+    .exit-ok   { color: #3fb950; font-size: 12px; }
+    .exit-err  { color: #f85149; font-size: 12px; }
+    .exit-deny { color: #d29922; font-size: 12px; }
+
+    .action-out {
+      padding: 8px 12px;
+      font-size: 12px;
+      background: #0d1117;
+      border-top: 1px solid #21262d;
+    }
+    .out-label { color: #484f58; margin-bottom: 3px; }
+    .out-content { color: #c9d1d9; margin-bottom: 8px; }
+    .out-content:last-child { margin-bottom: 0; }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 220px;
+      overflow-y: auto;
+      background: #0d1117;
+    }
+
+    .empty-state { color: #6e7681; font-size: 13px; font-style: italic; padding: 12px 0 4px; }
+
+    .no-runs-msg { color: #6e7681; font-size: 13px; font-style: italic; text-align: center; padding: 32px; }
+
+    /* ── Final message ──────────────────────────────── */
+    .final-message {
+      background: #1a2d3f;
+      border: 1px solid #1f4a6e;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      color: #c9d1d9;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .final-message .msg-label {
+      color: #58a6ff;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    /* ── Spinner ────────────────────────────────────── */
+    .spin {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Tabs ───────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #30363d;
+      padding-bottom: 0;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 14px;
+      font-family: inherit;
+      font-weight: 500;
+      padding: 8px 16px 10px;
+      margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover:not(:disabled) { color: #e6edf3; background: none; }
+    .tab-btn.active { color: #e6edf3; border-bottom-color: #58a6ff; }
+
+    /* ── Tab panels ─────────────────────────────────── */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Webhook-specific status pills ─────────────── */
+    .s-queued  { background: #2d1f5e; color: #a371f7; }
+    .s-skipped { background: #21262d; color: #6e7681; }
+
+    /* ── Fingerprint badge ──────────────────────────── */
+    .fp-badge {
+      background: #3d2f1f;
+      color: #d29922;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 11px;
+      font-family: inherit;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>notesllm Agent</h1>
+    <p>Kubernetes operations agent — ask a question and watch it work.</p>
+  </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="manual" onclick="switchTab('manual')">Manual Runs</button>
+    <button class="tab-btn" data-tab="webhooks" onclick="switchTab('webhooks')">Webhook Events</button>
+  </div>
+
+  <div id="panel-manual" class="tab-panel active">
+    <div class="query-box">
+      <textarea id="prompt" placeholder="e.g. Show me the status of all deployments in the notesllm namespace"></textarea>
+      <div class="form-footer">
+        <span class="form-hint">OPA role: <span id="currentRole">INFRA_OBSERVER</span></span>
+        <button id="runBtn" onclick="submitRun()">&#9654;&nbsp; Run</button>
+      </div>
+    </div>
+
+    <div class="runs-header">
+      <h2>Runs</h2>
+      <span class="badge" id="runCount">0</span>
+    </div>
+    <div id="runsList"></div>
+  </div>
+
+  <div id="panel-webhooks" class="tab-panel">
+    <div class="runs-header">
+      <h2>Webhook Events</h2>
+      <span class="badge" id="webhookCount">0</span>
+    </div>
+    <div id="webhooksList"></div>
+  </div>
+
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────
+  // Ordered map: run_id → run data. We use an array to track insertion order.
+  const runOrder = [];             // run_id strings, newest last
+  const runData  = {};             // run_id → run object
+  const polling  = new Set();      // run_ids currently being polled
+
+  const webhookOrder = [];   // event_id strings, newest first
+  const webhookData  = {};   // event_id → webhook event object
+  const whRunPolling = new Set(); // run_ids being polled from webhook cards
+
+  // ── Tab switching ──────────────────────────────────────────
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    document.getElementById('panel-manual').classList.toggle('active', tab === 'manual');
+    document.getElementById('panel-webhooks').classList.toggle('active', tab === 'webhooks');
+  }
+
+  // ── Submit ─────────────────────────────────────────
+  async function submitRun() {
+    const promptEl = document.getElementById('prompt');
+    const btn      = document.getElementById('runBtn');
+    const prompt   = promptEl.value.trim();
+    if (!prompt) { promptEl.focus(); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span> Starting…';
+
+    try {
+      const res = await fetch('/api/agent/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+
+      promptEl.value = '';
+      upsertRun({ run_id: data.run_id, prompt, status: 'running', history: [] }, true);
+      renderRuns();
+      pollRun(data.run_id);
+    } catch (e) {
+      alert('Failed to start run: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '&#9654;&nbsp; Run';
+    }
+  }
+
+  // ── Polling ────────────────────────────────────────
+  async function pollRun(run_id) {
+    if (polling.has(run_id)) return;
+    polling.add(run_id);
+    while (true) {
+      try {
+        const res = await fetch('/api/agent/runs/' + run_id);
+        if (!res.ok) break;
+        const data = await res.json();
+        upsertRun(data, false);
+        renderRuns();
+        if (data.status !== 'running') break;
+      } catch (_) { break; }
+      await sleep(2000);
+    }
+    polling.delete(run_id);
+  }
+
+  // ── Initial load ───────────────────────────────────
+  async function loadAll() {
+    try {
+      const res = await fetch('/api/agent/runs');
+      if (!res.ok) return;
+      const list = await res.json();
+      for (const r of list) {
+        upsertRun(r, false);
+        if (r.status === 'running') pollRun(r.run_id);
+      }
+      renderRuns();
+    } catch (_) {}
+
+    // Also load webhook events and start periodic refresh
+    await loadWebhooks();
+    setInterval(loadWebhooks, 5000);
+  }
+
+  // ── Data helpers ───────────────────────────────────
+  function upsertRun(run, prepend) {
+    if (!runData[run.run_id]) {
+      if (prepend) {
+        runOrder.unshift(run.run_id);  // newest first
+      } else {
+        runOrder.push(run.run_id);
+      }
+    }
+    runData[run.run_id] = run;
+  }
+
+  // ── Render ─────────────────────────────────────────
+  function renderRuns() {
+    const container = document.getElementById('runsList');
+    document.getElementById('runCount').textContent = runOrder.length;
+
+    if (runOrder.length === 0) {
+      container.innerHTML = '<div class="no-runs-msg">No runs yet. Ask a question above.</div>';
+      return;
+    }
+
+    // Update or insert cards in document order (runOrder[0] = newest)
+    for (const run_id of runOrder) {
+      const run  = runData[run_id];
+      const card = document.getElementById('card-' + run_id);
+      if (card) {
+        updateCard(card, run);
+      } else {
+        const newCard = buildCard(run);
+        container.prepend(newCard); // newest at top only when brand-new card
+      }
+    }
+  }
+
+  // ── Card construction ──────────────────────────────
+  function buildCard(run) {
+    const card = document.createElement('div');
+    card.className = 'run-card';
+    card.id = 'card-' + run.run_id;
+
+    const summary = document.createElement('div');
+    summary.className = 'run-summary';
+    summary.addEventListener('click', () => toggleBody(run.run_id));
+
+    const body = document.createElement('div');
+    body.className = 'run-body collapsed';
+    body.id = 'body-' + run.run_id;
+
+    const chevron = document.createElement('span');
+    chevron.className = 'chevron';
+    chevron.id = 'chev-' + run.run_id;
+    chevron.textContent = '▶';
+
+    summary.appendChild(chevron);
+    card.appendChild(summary);
+    card.appendChild(body);
+
+    populateSummary(summary, run);
+    populateBody(body, run);
+
+    // Auto-expand the most recent run
+    if (runOrder[0] === run.run_id) {
+      body.classList.remove('collapsed');
+      chevron.textContent = '▼';
+    }
+
+    return card;
+  }
+
+  function updateCard(card, run) {
+    const summary = card.querySelector('.run-summary');
+    const body    = card.querySelector('.run-body');
+    const chevron = card.querySelector('.chevron');
+    summary.innerHTML = '';
+    summary.appendChild(chevron);
+    populateSummary(summary, run);
+    populateBody(body, run);
+  }
+
+  function populateSummary(summary, run) {
+    const isRunning = run.status === 'running';
+    const pill = document.createElement('span');
+    pill.className = 'status-pill s-' + run.status;
+    if (isRunning) pill.innerHTML = '<span class="spin"></span>';
+    pill.appendChild(document.createTextNode(run.status));
+
+    const prompt = document.createElement('span');
+    prompt.className = 'run-prompt';
+    prompt.textContent = run.prompt;
+
+    const meta = document.createElement('span');
+    meta.className = 'run-meta';
+    meta.textContent = run.run_id.slice(0, 8);
+
+    summary.appendChild(pill);
+    summary.appendChild(prompt);
+    summary.appendChild(meta);
+  }
+
+  function populateBody(body, run) {
+    body.innerHTML = '';
+
+    if (run.final_message) {
+      const msgBox   = document.createElement('div');
+      msgBox.className = 'final-message';
+      const msgLabel = document.createElement('div');
+      msgLabel.className = 'msg-label';
+      msgLabel.textContent = 'Summary';
+      const msgText  = document.createElement('div');
+      msgText.textContent = run.final_message;
+      msgBox.appendChild(msgLabel);
+      msgBox.appendChild(msgText);
+      body.appendChild(msgBox);
+    }
+
+    const label = document.createElement('div');
+    label.className = 'section-label';
+    label.textContent = 'Executor history';
+    body.appendChild(label);
+
+    if (!run.history || run.history.length === 0) {
+      const msg = document.createElement('div');
+      msg.className = 'empty-state';
+      msg.textContent = run.status === 'running'
+        ? 'Agent is thinking…'
+        : 'No commands were executed.';
+      body.appendChild(msg);
+      return;
+    }
+
+    for (const action of run.history) {
+      body.appendChild(buildActionRow(action));
+    }
+  }
+
+  function buildActionRow(action) {
+    const row  = document.createElement('div');
+    row.className = 'action-row';
+
+    const head = document.createElement('div');
+    head.className = 'action-head';
+
+    const cmd = document.createElement('span');
+    cmd.className = 'action-cmd';
+    cmd.textContent = (action.command?.argv ?? []).join(' ');
+    head.appendChild(cmd);
+
+    if (!action.allowed) {
+      const deny = document.createElement('span');
+      deny.className = 'exit-deny';
+      deny.textContent = 'DENIED: ' + (action.policy_reason ?? 'policy');
+      head.appendChild(deny);
+    } else if (action.exit_code !== null && action.exit_code !== undefined) {
+      const ec = document.createElement('span');
+      ec.className = action.exit_code === 0 ? 'exit-ok' : 'exit-err';
+      ec.textContent = 'exit ' + action.exit_code;
+      head.appendChild(ec);
+    }
+
+    row.appendChild(head);
+
+    if (action.stdout || action.stderr) {
+      const out = document.createElement('div');
+      out.className = 'action-out';
+
+      if (action.stdout) {
+        const lbl = document.createElement('div');
+        lbl.className = 'out-label';
+        lbl.textContent = 'stdout';
+        const content = document.createElement('div');
+        content.className = 'out-content';
+        const pre = document.createElement('pre');
+        pre.textContent = action.stdout;
+        content.appendChild(pre);
+        out.appendChild(lbl);
+        out.appendChild(content);
+      }
+
+      if (action.stderr) {
+        const lbl = document.createElement('div');
+        lbl.className = 'out-label';
+        lbl.textContent = 'stderr';
+        const content = document.createElement('div');
+        content.className = 'out-content';
+        const pre = document.createElement('pre');
+        pre.textContent = action.stderr;
+        content.appendChild(pre);
+        out.appendChild(lbl);
+        out.appendChild(content);
+      }
+
+      row.appendChild(out);
+    }
+
+    return row;
+  }
+
+  function toggleBody(run_id) {
+    const body  = document.getElementById('body-' + run_id);
+    const chev  = document.getElementById('chev-' + run_id);
+    const open  = !body.classList.contains('collapsed');
+    body.classList.toggle('collapsed', open);
+    chev.textContent = open ? '▶' : '▼';
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // ── Webhook data helpers ───────────────────────────────────
+  function upsertWebhook(evt) {
+    if (!webhookData[evt.event_id]) {
+      webhookOrder.unshift(evt.event_id); // newest first
+    }
+    webhookData[evt.event_id] = evt;
+  }
+
+  // ── Webhook render ─────────────────────────────────────────
+  function renderWebhooks() {
+    const container = document.getElementById('webhooksList');
+    document.getElementById('webhookCount').textContent = webhookOrder.length;
+
+    if (webhookOrder.length === 0) {
+      container.innerHTML = '<div class="no-runs-msg">No webhook events received yet.</div>';
+      return;
+    }
+
+    for (const event_id of webhookOrder) {
+      const evt  = webhookData[event_id];
+      const card = document.getElementById('evcard-' + event_id);
+      if (card) {
+        updateEventCard(card, evt);
+      } else {
+        container.prepend(buildEventCard(evt));
+      }
+    }
+  }
+
+  function buildEventCard(evt) {
+    const card = document.createElement('div');
+    card.className = 'run-card';
+    card.id = 'evcard-' + evt.event_id;
+
+    const summary = document.createElement('div');
+    summary.className = 'run-summary';
+    summary.addEventListener('click', () => toggleEventBody(evt.event_id));
+
+    const body = document.createElement('div');
+    body.className = 'run-body collapsed';
+    body.id = 'evbody-' + evt.event_id;
+
+    const chevron = document.createElement('span');
+    chevron.className = 'chevron';
+    chevron.id = 'evchev-' + evt.event_id;
+    chevron.textContent = '▶';
+
+    summary.appendChild(chevron);
+    card.appendChild(summary);
+    card.appendChild(body);
+
+    populateEventSummary(summary, evt);
+    populateEventBody(body, evt);
+
+    // Auto-expand most recent
+    if (webhookOrder[0] === evt.event_id) {
+      body.classList.remove('collapsed');
+      chevron.textContent = '▼';
+    }
+
+    return card;
+  }
+
+  function updateEventCard(card, evt) {
+    const summary = card.querySelector('.run-summary');
+    const body    = card.querySelector('.run-body');
+    const chevron = card.querySelector('.chevron');
+    summary.innerHTML = '';
+    summary.appendChild(chevron);
+    populateEventSummary(summary, evt);
+    populateEventBody(body, evt);
+  }
+
+  function eventStatus(evt) {
+    if (evt.skipped) return 'skipped';
+    if (!evt.run_id) return 'queued';
+    const run = runData[evt.run_id];
+    return run ? run.status : 'queued';
+  }
+
+  function populateEventSummary(summary, evt) {
+    const status = eventStatus(evt);
+    const isRunning = status === 'running';
+
+    const pill = document.createElement('span');
+    pill.className = 'status-pill s-' + status;
+    if (isRunning) pill.innerHTML = '<span class="spin"></span>';
+    pill.appendChild(document.createTextNode(status));
+
+    const ts = document.createElement('span');
+    ts.className = 'run-prompt';
+    ts.textContent = new Date(evt.received_at).toLocaleString();
+
+    const fp = document.createElement('span');
+    fp.className = 'fp-badge';
+    fp.textContent = evt.fingerprint.slice(0, 8);
+
+    const meta = document.createElement('span');
+    meta.className = 'run-meta';
+    meta.textContent = evt.event_id.slice(0, 8);
+
+    summary.appendChild(pill);
+    summary.appendChild(ts);
+    summary.appendChild(fp);
+    summary.appendChild(meta);
+  }
+
+  function populateEventBody(body, evt) {
+    body.innerHTML = '';
+
+    // Raw payload
+    const payloadLabel = document.createElement('div');
+    payloadLabel.className = 'section-label';
+    payloadLabel.textContent = 'Received payload';
+    body.appendChild(payloadLabel);
+
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'padding:10px;border:1px solid #21262d;border-radius:6px;margin-bottom:14px;';
+    pre.textContent = JSON.stringify(evt.raw_payload, null, 2);
+    body.appendChild(pre);
+
+    // Linked run
+    if (evt.run_id && runData[evt.run_id]) {
+      const runLabel = document.createElement('div');
+      runLabel.className = 'section-label';
+      runLabel.textContent = 'Agent run';
+      body.appendChild(runLabel);
+      const runBody = document.createElement('div');
+      populateBody(runBody, runData[evt.run_id]);
+      body.appendChild(runBody);
+    } else if (!evt.skipped && evt.run_id) {
+      const pending = document.createElement('div');
+      pending.className = 'empty-state';
+      pending.textContent = 'Run not yet started…';
+      body.appendChild(pending);
+    }
+  }
+
+  function toggleEventBody(event_id) {
+    const body = document.getElementById('evbody-' + event_id);
+    const chev = document.getElementById('evchev-' + event_id);
+    const open = !body.classList.contains('collapsed');
+    body.classList.toggle('collapsed', open);
+    chev.textContent = open ? '▶' : '▼';
+  }
+
+  // ── Webhook run polling ────────────────────────────────────
+  async function pollRunForWebhook(run_id) {
+    if (whRunPolling.has(run_id)) return;
+    whRunPolling.add(run_id);
+    while (true) {
+      try {
+        const res = await fetch('/api/agent/runs/' + run_id);
+        if (!res.ok) break;
+        const data = await res.json();
+        upsertRun(data, false);
+        renderWebhooks();
+        renderRuns();
+        if (data.status !== 'running') break;
+      } catch (_) { break; }
+      await sleep(2000);
+    }
+    whRunPolling.delete(run_id);
+  }
+
+  // ── Webhook list polling ───────────────────────────────────
+  async function loadWebhooks() {
+    try {
+      const res = await fetch('/api/agent/webhooks');
+      if (!res.ok) return;
+      const list = await res.json();
+      for (const evt of list) {
+        upsertWebhook(evt);
+        // Start polling the linked run if it's active
+        if (evt.run_id && (!runData[evt.run_id] || runData[evt.run_id].status === 'running')) {
+          pollRunForWebhook(evt.run_id);
+        }
+      }
+      renderWebhooks();
+    } catch (_) {}
+  }
+
+  // ── Boot ───────────────────────────────────────────
+  loadAll();
+</script>
+</body>
+</html>
