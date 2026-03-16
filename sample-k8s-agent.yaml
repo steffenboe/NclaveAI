@@ -1,0 +1,290 @@
+# notesllm-agent ServiceAccount (Workload Identity)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: notesllm-agent
+  namespace: notesllm
+#  annotations:
+#    azure.workload.identity/client-id: "<AZURE_IDENTITY_CLIENT_ID>"
+---
+# notesllm-agent RBAC Role (namespace-scoped, least privilege)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: notesllm-agent-role
+  namespace: notesllm
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+---
+# notesllm-agent RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: notesllm-agent-binding
+  namespace: notesllm
+subjects:
+  - kind: ServiceAccount
+    name: notesllm-agent
+    namespace: notesllm
+roleRef:
+  kind: Role
+  name: notesllm-agent-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# notesllm-agent ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-config
+  namespace: notesllm
+data:
+  LLM_BASE_URL: "https://ai.exxeta.info"
+  LLM_MODEL: "gpt-4.1"
+  AGENT_ROLES: "INFRA_OBSERVER"
+  MAX_ITERATIONS: "10"
+  KUBE_NAMESPACE: "notesllm"
+  AKS_RESOURCE_GROUP: "notesllm"
+  AKS_CLUSTER_NAME: "notesllm-prod"
+  AZURE_TENANT_ID: "<AZURE_TENANT_ID>"
+  AZURE_CLIENT_ID: "<AZURE_CLIENT_ID>"
+---
+# notesllm-agent OPA policy ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-policy
+  namespace: notesllm
+data:
+  executor.rego: |
+    package notesllm.agent
+
+    role_commands := {
+        "INFRA_OBSERVER": [
+            ["kubectl", "get"],
+            ["kubectl", "logs"],
+            ["kubectl", "describe"],
+            ["helm", "list"],
+            ["helm", "status"],
+        ],
+        "INFRA_OPERATOR": [
+            ["kubectl", "get"],
+            ["kubectl", "logs"],
+            ["kubectl", "describe"],
+            ["kubectl", "rollout"],
+            ["kubectl", "scale"],
+            ["helm", "list"],
+            ["helm", "status"],
+            ["helm", "upgrade"],
+        ],
+    }
+
+    default allow = false
+
+    # True when the command targets Kubernetes secret resources
+    targets_secrets {
+        input.argv[_] = "secret"
+    }
+
+    targets_secrets {
+        input.argv[_] = "secrets"
+    }
+
+    # INFRA_OBSERVER is not permitted to read secrets
+    observer_secrets_forbidden {
+        input.roles[_] = "INFRA_OBSERVER"
+        targets_secrets
+    }
+
+    allow {
+        not observer_secrets_forbidden
+        some role
+        some prefix
+        input.roles[_] = role
+        prefix = role_commands[role][_]
+        array.slice(input.argv, 0, count(prefix)) = prefix
+    }
+---
+# agent-runtime ConfigMap: defines tool installation and entrypoint script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-runtime
+  namespace: notesllm
+data:
+  install-tools.sh: |
+    #!/bin/sh
+    set -e
+
+    echo "Installing Azure CLI..."
+    curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
+    echo "Installing kubectl..."
+    curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    rm kubectl
+
+    echo "Installing kubelogin..."
+    curl -sLo /tmp/kubelogin.zip "https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip"
+    unzip /tmp/kubelogin.zip -d /tmp/kubelogin
+    install -o root -g root -m 0755 /tmp/kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/kubelogin
+    rm -rf /tmp/kubelogin.zip /tmp/kubelogin
+
+    echo "Tool installation complete."
+
+  entrypoint.sh: |
+    #!/bin/sh
+    set -e
+
+    echo "Logging in to Azure via Workload Identity..."
+    az login --federated-token "$(cat "$AZURE_FEDERATED_TOKEN_FILE")" \
+      --service-principal \
+      --username "$AZURE_CLIENT_ID" \
+      --tenant "$AZURE_TENANT_ID" \
+      --output none
+
+    echo "Fetching AKS credentials..."
+    export KUBECONFIG=/tmp/kubeconfig
+    az aks get-credentials \
+      --resource-group "$AKS_RESOURCE_GROUP" \
+      --name "$AKS_CLUSTER_NAME" \
+      --overwrite-existing
+
+    echo "Converting kubeconfig for workload identity..."
+    kubelogin convert-kubeconfig -l workloadidentity --kubeconfig "$KUBECONFIG"
+
+    echo "Starting agent..."
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8081
+---
+# notesllm-agent Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-deployment
+  namespace: notesllm
+  labels:
+    app: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: notesllm-agent
+      containers:
+        - name: agent
+          image: notesllm.azurecr.io/notesllm-agent:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8081
+          env:
+            - name: KUBECONFIG
+              value: /tmp/kubeconfig
+            - name: POLICY_PATH
+              value: /etc/agent/policy.rego
+            - name: AZURE_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: AZURE_CLIENT_ID
+            - name: AZURE_TENANT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: AZURE_TENANT_ID
+            - name: AKS_RESOURCE_GROUP
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: AKS_RESOURCE_GROUP
+            - name: AKS_CLUSTER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: AKS_CLUSTER_NAME
+            - name: LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: LLM_BASE_URL
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: LLM_MODEL
+            - name: AGENT_ROLES
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: AGENT_ROLES
+            - name: MAX_ITERATIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: MAX_ITERATIONS
+            - name: KUBE_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-config
+                  key: KUBE_NAMESPACE
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-secret
+                  key: llm-api-key
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: policy-volume
+              mountPath: /etc/agent/policy.rego
+              subPath: executor.rego
+              readOnly: true # make sure the agent does not modify the policy file
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      imagePullSecrets:
+        - name: acr-secret
+      volumes:
+        - name: policy-volume
+          configMap:
+            name: agent-policy
+---
+# notesllm-agent Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  namespace: notesllm
+spec:
+  selector:
+    app: agent
+  ports:
+    - port: 8081
+      targetPort: 8081
+  type: ClusterIP
