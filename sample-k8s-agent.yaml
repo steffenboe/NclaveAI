@@ -253,13 +253,13 @@ spec:
               memory: "512Mi"
               cpu: "500m"
           volumeMounts:
+            - name: runtime-volume
+              mountPath: /etc/agent
+              readOnly: true
             - name: policy-volume
               mountPath: /etc/agent/policy.rego
               subPath: executor.rego
               readOnly: true # make sure the agent does not modify the policy file
-            - name: runtime-volume
-              mountPath: /etc/agent
-              readOnly: true
           livenessProbe:
             httpGet:
               path: /health
