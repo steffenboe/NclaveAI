@@ -3,159 +3,184 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OPS Agent - Dashboard</title>
+  <title>Developer Companion</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       background: #0d1117;
       color: #e6edf3;
-      font-family: ui-monospace, 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-family: ui-monospace, 'Cascadia Code', 'Fira Code', Consolas, monospace;
       font-size: 14px;
       line-height: 1.5;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
     }
 
-    .container { max-width: 960px; margin: 0 auto; padding: 32px 20px; }
-
-    header { margin-bottom: 28px; }
-    header h1 { font-size: 22px; color: #58a6ff; letter-spacing: -0.3px; }
-    header p  { color: #8b949e; font-size: 13px; margin-top: 4px; }
-
-    /* ── Query form ─────────────────────────────────── */
-    .query-box {
+    /* ── Sidebar ─────────────────────────────────────── */
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
       background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 28px;
+      border-right: 1px solid #21262d;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
-    textarea {
+    .sidebar-top {
+      padding: 12px 10px 8px;
+      border-bottom: 1px solid #21262d;
+    }
+    .btn-new-chat {
       width: 100%;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
-      padding: 10px 12px;
-      font-family: inherit;
-      font-size: 14px;
-      resize: vertical;
-      min-height: 76px;
-      transition: border-color 0.15s;
-    }
-    textarea:focus { outline: none; border-color: #58a6ff; }
-    textarea::placeholder { color: #484f58; }
-
-    .form-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
-    .form-hint { color: #6e7681; font-size: 12px; }
-
-    button {
       background: #238636;
       color: #fff;
       border: none;
       border-radius: 6px;
-      padding: 8px 18px;
-      cursor: pointer;
+      padding: 8px 12px;
       font-size: 13px;
       font-family: inherit;
       font-weight: 600;
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      transition: background 0.15s;
-    }
-    button:hover:not(:disabled) { background: #2ea043; }
-    button:disabled { background: #21262d; color: #6e7681; cursor: not-allowed; }
-
-    /* ── Runs list header ───────────────────────────── */
-    .runs-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-    .runs-header h2 { font-size: 15px; color: #e6edf3; }
-    .badge {
-      background: #21262d;
-      border-radius: 20px;
-      padding: 1px 9px;
-      font-size: 12px;
-      color: #8b949e;
-    }
-
-    /* ── Run card ───────────────────────────────────── */
-    .run-card {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      margin-bottom: 10px;
-      overflow: hidden;
-    }
-
-    .run-summary {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 12px 16px;
       cursor: pointer;
-      user-select: none;
+      text-align: left;
     }
-    .run-summary:hover { background: #1c2128; }
+    .btn-new-chat:hover { background: #2ea043; }
 
-    .status-pill {
-      flex-shrink: 0;
-      border-radius: 20px;
-      padding: 2px 10px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.3px;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .s-running       { background: #1f3a5f; color: #58a6ff; }
-    .s-done          { background: #1a3a2a; color: #3fb950; }
-    .s-failed        { background: #3d1f1f; color: #f85149; }
-    .s-policy_denied { background: #3d2f1f; color: #d29922; }
-    .s-waiting_approval { background: #2d1f5e; color: #a371f7; }
-
-    .run-prompt { flex: 1; color: #e6edf3; word-break: break-word; }
-    .run-meta   { flex-shrink: 0; color: #484f58; font-size: 12px; white-space: nowrap; }
-
-    .chevron { color: #6e7681; font-size: 11px; flex-shrink: 0; margin-top: 2px; }
-
-    .run-body { padding: 0 16px 16px; border-top: 1px solid #21262d; }
-    .run-body.collapsed { display: none; }
-
-    .section-label { color: #8b949e; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; margin: 12px 0 8px; }
-
-    /* ── Action row ─────────────────────────────────── */
-    .action-row {
-      border: 1px solid #21262d;
-      border-radius: 6px;
-      margin-bottom: 8px;
-      overflow: hidden;
-    }
-    .action-head {
+    .sidebar-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 8px;
       display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 12px;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .sidebar-item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .sidebar-item:hover { background: #21262d; }
+    .sidebar-item.active { background: #1f4a6e; }
+    .sidebar-prompt {
+      font-size: 12px;
+      color: #e6edf3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+    .sidebar-item.active .sidebar-prompt { color: #79c0ff; }
+    .sidebar-status { font-size: 11px; }
+
+    .sidebar-bottom {
+      padding: 10px 12px;
+      border-top: 1px solid #21262d;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .btn-gear {
+      background: none;
+      border: none;
+      color: #6e7681;
+      font-size: 18px;
+      cursor: pointer;
+      padding: 2px 4px;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .btn-gear:hover { color: #e6edf3; }
+
+    /* ── Main area ───────────────────────────────────── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
       background: #0d1117;
     }
-    .action-cmd { flex: 1; color: #79c0ff; word-break: break-all; }
-    .action-cmd::before { content: "$ "; color: #484f58; }
 
-    .exit-ok   { color: #3fb950; font-size: 12px; }
-    .exit-err  { color: #f85149; font-size: 12px; }
-    .exit-deny { color: #d29922; font-size: 12px; }
+    .conversation-feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .empty-hint {
+      margin: auto;
+      color: #484f58;
+      font-size: 13px;
+      font-style: italic;
+      text-align: center;
+    }
+
+    /* ── Conversation turns ──────────────────────────── */
+    .turn-user {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .user-bubble {
+      background: #1f4a6e;
+      color: #c9d1d9;
+      font-size: 13px;
+      padding: 10px 14px;
+      border-radius: 12px 12px 2px 12px;
+      max-width: 70%;
+      word-break: break-word;
+    }
+
+    .turn-agent {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 88%;
+    }
+    .agent-label {
+      font-size: 10px;
+      color: #6e7681;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    /* ── Command cards ───────────────────────────────── */
+    .cmd-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 2px 8px 8px 8px;
+      overflow: hidden;
+    }
+    .cmd-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      background: #0d1117;
+    }
+    .cmd-argv {
+      flex: 1;
+      color: #79c0ff;
+      font-size: 12px;
+      word-break: break-all;
+    }
+    .cmd-argv::before { content: "$ "; color: #484f58; }
+
+    .badge-ok   { font-size: 11px; color: #3fb950; flex-shrink: 0; }
+    .badge-err  { font-size: 11px; color: #f85149; flex-shrink: 0; }
+    .badge-denied { font-size: 11px; color: #d29922; flex-shrink: 0; }
 
     .skill-tag {
-      font-size: 11px;
-      border-radius: 4px;
-      padding: 1px 7px;
+      font-size: 10px;
       background: #1a2d3f;
       color: #58a6ff;
       border: 1px solid #1f4a6e;
+      border-radius: 4px;
+      padding: 1px 6px;
       flex-shrink: 0;
     }
     .skill-tag.fallback {
@@ -163,94 +188,166 @@
       color: #6e7681;
       border-color: #30363d;
     }
-    .action-rationale {
+
+    .cmd-rationale {
       font-size: 11px;
       color: #6e7681;
+      font-style: italic;
       padding: 4px 12px 6px;
       border-top: 1px solid #21262d;
       background: #0d1117;
-      font-style: italic;
+    }
+    .cmd-output {
+      border-top: 1px solid #21262d;
+      background: #0d1117;
+    }
+    .cmd-output-toggle {
+      padding: 5px 12px;
+      font-size: 10px;
+      color: #484f58;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+    }
+    .cmd-output-toggle::-webkit-details-marker { display: none; }
+    .cmd-output[open] .cmd-output-toggle::before { content: "▾ "; }
+    .cmd-output:not([open]) .cmd-output-toggle::before { content: "▸ "; }
+    .cmd-output pre {
+      padding: 0 12px 8px;
+      font-size: 11px;
+      color: #c9d1d9;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .cmd-output pre.stderr { color: #f85149; }
+
+    /* ── Thinking indicator ──────────────────────────── */
+    .thinking {
+      font-size: 12px;
+      color: #58a6ff;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 0;
     }
 
-    /* ── Approval section ───────────────────────────────────── */
-    .approval-section {
-      border: 1px solid #a371f7;
-      border-radius: 6px;
-      padding: 12px 14px;
-      margin-bottom: 14px;
+    /* ── Approval card ───────────────────────────────── */
+    .approval-card {
       background: #1a1030;
+      border: 1px solid #a371f7;
+      border-radius: 2px 8px 8px 8px;
+      overflow: hidden;
     }
-    .approval-label {
-      color: #a371f7;
+    .approval-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #a371f730;
       font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
+      color: #a371f7;
+      font-weight: 700;
+      letter-spacing: 0.4px;
       text-transform: uppercase;
-      margin-bottom: 8px;
     }
+    .approval-dot {
+      width: 7px;
+      height: 7px;
+      background: #a371f7;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .approval-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
     .approval-cmd {
+      font-size: 12px;
       color: #79c0ff;
-      margin-bottom: 4px;
       word-break: break-all;
     }
     .approval-cmd::before { content: "$ "; color: #484f58; }
-    .approval-rationale {
-      color: #6e7681;
-      font-size: 12px;
-      font-style: italic;
-      margin-bottom: 10px;
+    .approval-rationale { font-size: 11px; color: #6e7681; font-style: italic; }
+    .approval-actions { display: flex; gap: 8px; margin-top: 4px; }
+    .btn-approve {
+      background: #1a3a2a; border: 1px solid #2ea043; color: #3fb950;
+      border-radius: 5px; padding: 5px 14px; font-size: 12px;
+      font-family: inherit; cursor: pointer;
     }
-    .approval-actions { display: flex; gap: 8px; }
-    .btn-approve { background: #1a3a2a; border: 1px solid #2ea043; color: #3fb950; }
     .btn-approve:hover:not(:disabled) { background: #1f4a35; }
-    .btn-deny { background: #3d1f1f; border: 1px solid #8b2a2a; color: #f85149; }
+    .btn-deny {
+      background: #3d1f1f; border: 1px solid #8b2a2a; color: #f85149;
+      border-radius: 5px; padding: 5px 14px; font-size: 12px;
+      font-family: inherit; cursor: pointer;
+    }
     .btn-deny:hover:not(:disabled) { background: #4d2525; }
+    .btn-approve:disabled, .btn-deny:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    .action-out {
-      padding: 8px 12px;
-      font-size: 12px;
-      background: #0d1117;
-      border-top: 1px solid #21262d;
-    }
-    .out-label { color: #484f58; margin-bottom: 3px; }
-    .out-content { color: #c9d1d9; margin-bottom: 8px; }
-    .out-content:last-child { margin-bottom: 0; }
-    pre {
-      white-space: pre-wrap;
-      word-break: break-all;
-      max-height: 220px;
-      overflow-y: auto;
-      background: #0d1117;
-    }
-
-    .empty-state { color: #6e7681; font-size: 13px; font-style: italic; padding: 12px 0 4px; }
-
-    .no-runs-msg { color: #6e7681; font-size: 13px; font-style: italic; text-align: center; padding: 32px; }
-
-    /* ── Final message ──────────────────────────────── */
-    .final-message {
-      background: #1a2d3f;
-      border: 1px solid #1f4a6e;
+    /* ── Status banner ───────────────────────────────── */
+    .status-banner {
       border-radius: 6px;
-      padding: 10px 14px;
-      margin-bottom: 14px;
-      color: #c9d1d9;
-      font-size: 13px;
-      line-height: 1.6;
+      padding: 9px 13px;
+      font-size: 12px;
+      margin-top: 4px;
     }
-    .final-message .msg-label {
-      color: #58a6ff;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      margin-bottom: 5px;
-    }
+    .status-banner.s-done          { background: #1a3a2a; border: 1px solid #2ea043; color: #3fb950; }
+    .status-banner.s-failed        { background: #3d1f1f; border: 1px solid #8b2a2a; color: #f85149; }
+    .status-banner.s-policy_denied { background: #3d2f1f; border: 1px solid #6e4f1f; color: #d29922; }
 
-    /* ── Spinner ────────────────────────────────────── */
+    /* ── Input area ──────────────────────────────────── */
+    .input-area {
+      padding: 12px 32px 16px;
+      border-top: 1px solid #21262d;
+      background: #0d1117;
+    }
+    .input-wrapper {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      transition: border-color 0.15s, opacity 0.15s;
+    }
+    .input-wrapper:focus-within { border-color: #58a6ff; }
+    .input-wrapper.disabled { opacity: 0.5; }
+    #prompt-input {
+      flex: 1;
+      background: none;
+      border: none;
+      outline: none;
+      color: #e6edf3;
+      font-size: 13px;
+      font-family: inherit;
+      resize: none;
+      height: 22px;
+    }
+    #prompt-input::placeholder { color: #484f58; }
+    #run-btn {
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      padding: 5px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    #run-btn:hover:not(:disabled) { background: #2ea043; }
+    #run-btn:disabled { background: #21262d; color: #6e7681; cursor: not-allowed; }
+
+    /* ── Status pill colours ─────────────────────────── */
+    .s-running       { color: #58a6ff; }
+    .s-waiting_approval { color: #a371f7; }
+    .s-done          { color: #3fb950; }
+    .s-failed        { color: #f85149; }
+    .s-policy_denied { color: #d29922; }
+
+    /* ── Spinner ─────────────────────────────────────── */
     .spin {
       display: inline-block;
-      width: 10px; height: 10px;
+      width: 9px; height: 9px;
       border: 2px solid currentColor;
       border-top-color: transparent;
       border-radius: 50%;
@@ -258,191 +355,573 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Tabs ───────────────────────────────────────── */
-    .tabs {
+    /* ── Skills modal ────────────────────────────────── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(1,4,9,.75);
       display: flex;
-      gap: 4px;
-      margin-bottom: 20px;
-      border-bottom: 1px solid #30363d;
-      padding-bottom: 0;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
     }
-    .tab-btn {
-      background: none;
-      border: none;
-      border-bottom: 2px solid transparent;
-      border-radius: 0;
-      color: #8b949e;
-      cursor: pointer;
-      font-size: 14px;
-      font-family: inherit;
-      font-weight: 500;
-      padding: 8px 16px 10px;
-      margin-bottom: -1px;
-      transition: color 0.15s, border-color 0.15s;
-    }
-    .tab-btn:hover:not(:disabled) { color: #e6edf3; background: none; }
-    .tab-btn.active { color: #e6edf3; border-bottom-color: #58a6ff; }
-
-    /* ── Tab panels ─────────────────────────────────── */
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
-
-    /* ── Webhook-specific status pills ─────────────── */
-    .s-queued  { background: #2d1f5e; color: #a371f7; }
-    .s-skipped { background: #21262d; color: #6e7681; }
-
-    /* ── Fingerprint badge ──────────────────────────── */
-    .fp-badge {
-      background: #3d2f1f;
-      color: #d29922;
-      border-radius: 4px;
-      padding: 1px 6px;
-      font-size: 11px;
-      font-family: inherit;
-      flex-shrink: 0;
-    }
-
-    /* ── Skills ─────────────────────────────────────────────── */
-    .skill-card {
+    .modal-overlay.hidden { display: none; }
+    .modal {
       background: #161b22;
       border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 14px 16px;
-      margin-bottom: 10px;
+      border-radius: 10px;
+      width: 600px;
+      max-width: 95vw;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid #21262d;
+    }
+    .modal-header h2 { font-size: 15px; color: #e6edf3; }
+    .btn-close {
+      background: none; border: none; color: #6e7681;
+      font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 6px;
+    }
+    .btn-close:hover { color: #e6edf3; }
+    .modal-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+
+    /* Settings section inside modal */
+    .settings-section {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .settings-section label {
+      display: flex; align-items: center; gap: 8px;
+      cursor: pointer; color: #8b949e; font-size: 12px;
+    }
+
+    /* Skill cards */
+    .skill-card {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 11px 13px;
+      margin-bottom: 8px;
       display: flex;
       align-items: flex-start;
-      gap: 12px;
+      gap: 10px;
     }
     .skill-info { flex: 1; min-width: 0; }
-    .skill-name { color: #79c0ff; font-weight: 600; margin-bottom: 4px; }
-    .skill-desc { color: #8b949e; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .skill-actions { display: flex; gap: 6px; flex-shrink: 0; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; font-weight: 500; }
-    .btn-danger { background: #6e2323; }
-    .btn-danger:hover:not(:disabled) { background: #8b2a2a; }
-    .toggle-enabled { cursor: pointer; font-size: 12px; color: #8b949e; padding: 4px 10px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; font-family: inherit; }
-    .toggle-enabled.on { color: #3fb950; border-color: #2ea043; background: #1a3a2a; }
-
-    .policy-badge { font-size: 11px; border-radius: 4px; padding: 1px 7px; font-weight: 500; flex-shrink: 0; }
+    .skill-name { color: #79c0ff; font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+    .skill-desc { color: #8b949e; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .skill-actions { display: flex; gap: 5px; flex-shrink: 0; }
+    .policy-badge { font-size: 10px; border-radius: 4px; padding: 1px 6px; font-weight: 500; flex-shrink: 0; margin-top: 5px; display: inline-block; }
     .policy-badge.has-policy { background: #1a3a2a; color: #3fb950; }
     .policy-badge.no-policy  { background: #21262d; color: #6e7681; }
 
+    button.btn-sm { padding: 4px 9px; font-size: 11px; font-weight: 500; font-family: inherit; border-radius: 5px; cursor: pointer; border: none; }
+    button.btn-secondary { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; }
+    button.btn-secondary:hover { background: #2d333b; }
+    button.btn-danger { background: #6e2323; color: #f85149; }
+    button.btn-danger:hover { background: #8b2a2a; }
+    button.toggle-enabled { cursor: pointer; font-size: 11px; color: #8b949e; padding: 4px 9px; background: #21262d; border: 1px solid #30363d; border-radius: 5px; font-family: inherit; }
+    button.toggle-enabled.on { color: #3fb950; border-color: #2ea043; background: #1a3a2a; }
+
     .skill-form {
-      background: #161b22;
+      background: #0d1117;
       border: 1px solid #58a6ff;
       border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
+      padding: 14px;
+      margin-bottom: 14px;
     }
-    .skill-form label { display: block; color: #8b949e; font-size: 12px; margin-bottom: 4px; margin-top: 10px; }
+    .skill-form label { display: block; color: #8b949e; font-size: 11px; margin-bottom: 3px; margin-top: 10px; }
     .skill-form label:first-of-type { margin-top: 0; }
-    .skill-form input[type="text"] {
-      width: 100%;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
-      padding: 8px 10px;
-      font-family: inherit;
-      font-size: 13px;
-    }
-    .skill-form input[type="text"]:focus { outline: none; border-color: #58a6ff; }
+    .skill-form input[type="text"],
     .skill-form textarea {
-      min-height: 120px;
+      width: 100%;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 5px;
+      color: #e6edf3;
+      padding: 7px 9px;
+      font-family: inherit;
+      font-size: 12px;
     }
-    .form-actions { display: flex; gap: 8px; margin-top: 14px; }
-    .btn-secondary { background: #21262d; border: 1px solid #30363d; }
-    .btn-secondary:hover:not(:disabled) { background: #2d333b; }
+    .skill-form input[type="text"]:focus,
+    .skill-form textarea:focus { outline: none; border-color: #58a6ff; }
+    .skill-form textarea { min-height: 100px; resize: vertical; }
+    .form-actions { display: flex; gap: 7px; margin-top: 12px; }
+
+    .modal-add-btn {
+      width: 100%;
+      background: none;
+      border: 1px dashed #30363d;
+      color: #6e7681;
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    .modal-add-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+
+    .no-items-msg { color: #6e7681; font-size: 12px; font-style: italic; text-align: center; padding: 20px; }
   </style>
 </head>
 <body>
-<div class="container">
 
-  <header>
-    <h1>Developer Companion</h1>
-    <p>Personal agent — ask a question and watch it work.</p>
-  </header>
-
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="manual" onclick="switchTab('manual')">Manual Runs</button>
-    <button class="tab-btn" data-tab="webhooks" onclick="switchTab('webhooks')">Webhook Events</button>
-    <button class="tab-btn" data-tab="skills" onclick="switchTab('skills')">Skills</button>
+<!-- ── Sidebar ─────────────────────────────────────── -->
+<div class="sidebar">
+  <div class="sidebar-top">
+    <button class="btn-new-chat" onclick="newChat()">+ New chat</button>
   </div>
+  <div class="sidebar-list" id="sidebar-list"></div>
+  <div class="sidebar-bottom">
+    <button class="btn-gear" onclick="openSkillsModal()" title="Skills &amp; Settings">⚙</button>
+  </div>
+</div>
 
-  <div id="panel-manual" class="tab-panel active">
-    <div class="query-box">
-      <textarea id="prompt" placeholder="e.g. Show me the status of all deployments in the notesllm namespace"></textarea>
-      <div class="form-footer">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:#6e7681;font-size:12px;">
-          <input type="checkbox" id="approvalToggle" onchange="onApprovalToggle(this)"
+<!-- ── Main area ──────────────────────────────────── -->
+<div class="main">
+  <div class="conversation-feed" id="conversation-feed">
+    <div class="empty-hint">Start a new chat or select one from the sidebar.</div>
+  </div>
+  <div class="input-area">
+    <div class="input-wrapper" id="input-wrapper">
+      <input id="prompt-input" placeholder="Ask the agent something…"
+             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitRun();}" />
+      <button id="run-btn" onclick="submitRun()">&#9654;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Skills modal ───────────────────────────────── -->
+<div class="modal-overlay hidden" id="skills-modal" onclick="if(event.target===this)closeSkillsModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Skills &amp; Settings</h2>
+      <button class="btn-close" onclick="closeSkillsModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <!-- Approval toggle -->
+      <div class="settings-section">
+        <label>
+          <input type="checkbox" id="approval-toggle" onchange="onApprovalToggle(this)"
                  style="accent-color:#a371f7;cursor:pointer;" />
           Require approval before each command
         </label>
-        <button id="runBtn" onclick="submitRun()">&#9654;&nbsp; Run</button>
       </div>
+      <!-- Skill form -->
+      <div id="skill-form-container"></div>
+      <!-- Skills list -->
+      <div id="skills-list"></div>
+      <button class="modal-add-btn" onclick="showSkillForm()">+ Add skill</button>
     </div>
-
-    <div class="runs-header">
-      <h2>Runs</h2>
-      <span class="badge" id="runCount">0</span>
-    </div>
-    <div id="runsList"></div>
   </div>
-
-  <div id="panel-webhooks" class="tab-panel">
-    <div class="runs-header">
-      <h2>Webhook Events</h2>
-      <span class="badge" id="webhookCount">0</span>
-    </div>
-    <div id="webhooksList"></div>
-  </div>
-
-  <div id="panel-skills" class="tab-panel">
-    <div id="skill-form-container"></div>
-
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <h2 style="font-size:15px;color:#e6edf3;">Skills</h2>
-        <span class="badge" id="skillCount">0</span>
-      </div>
-      <button class="btn-sm" onclick="showSkillForm()">+ Add Skill</button>
-    </div>
-
-    <div id="skillsList"></div>
-  </div>
-
 </div>
 
 <script>
-  // ── State ──────────────────────────────────────────
-  // Ordered map: run_id → run data. We use an array to track insertion order.
-  const runOrder = [];             // run_id strings, newest last
-  const runData  = {};             // run_id → run object
-  const polling  = new Set();      // run_ids currently being polled
+  // ── State ──────────────────────────────────────────────
+  const runs = {};       // run_id → RunContext
+  const runOrder = [];   // insertion order
+  const polling = new Set();
+  let selectedRootId = null;
 
-  const webhookOrder = [];   // event_id strings, newest first
-  const webhookData  = {};   // event_id → webhook event object
-  const whRunPolling = new Set(); // run_ids being polled from webhook cards
-
-  // ── Tab switching ──────────────────────────────────────────
-  function switchTab(tab) {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tab);
-    });
-    document.getElementById('panel-manual').classList.toggle('active', tab === 'manual');
-    document.getElementById('panel-webhooks').classList.toggle('active', tab === 'webhooks');
-    document.getElementById('panel-skills').classList.toggle('active', tab === 'skills');
-    if (tab === 'skills') loadSkills();
+  // ── Chain helpers ──────────────────────────────────────
+  function getRoots() {
+    return runOrder.filter(id => !runs[id]?.parent_run_id);
   }
 
-  // ── Settings ───────────────────────────────────────────────
+  function getChain(rootId) {
+    const chain = [];
+    let current = rootId;
+    while (current) {
+      chain.push(current);
+      const next = runOrder.find(id => runs[id]?.parent_run_id === current) || null;
+      current = next;
+    }
+    return chain;
+  }
+
+  function getChainTailStatus(rootId) {
+    const chain = getChain(rootId);
+    return runs[chain[chain.length - 1]]?.status ?? 'running';
+  }
+
+  // ── Data helpers ───────────────────────────────────────
+  function upsertRun(run) {
+    if (!runs[run.run_id]) runOrder.push(run.run_id);
+    runs[run.run_id] = run;
+  }
+
+  // ── Polling ────────────────────────────────────────────
+  async function pollRun(run_id) {
+    if (polling.has(run_id)) return;
+    polling.add(run_id);
+    while (true) {
+      try {
+        const res = await fetch('/api/agent/runs/' + run_id);
+        if (!res.ok) break;
+        const data = await res.json();
+        upsertRun(data);
+        render();
+        if (data.status !== 'running' && data.status !== 'waiting_approval') break;
+      } catch { break; }
+      await sleep(2000);
+    }
+    polling.delete(run_id);
+  }
+
+  // ── Initial load ───────────────────────────────────────
+  async function loadAll() {
+    await loadSettings();
+    try {
+      const res = await fetch('/api/agent/runs');
+      if (!res.ok) return;
+      const list = await res.json();
+      for (const r of list) {
+        upsertRun(r);
+        if (r.status === 'running' || r.status === 'waiting_approval') pollRun(r.run_id);
+      }
+      const roots = getRoots();
+      if (roots.length > 0) selectedRootId = roots[roots.length - 1];
+    } catch {}
+    render();
+  }
+
+  // ── Render ─────────────────────────────────────────────
+  function render() {
+    renderSidebar();
+    renderMain();
+  }
+
+  // ── Sidebar ────────────────────────────────────────────
+  function renderSidebar() {
+    const list = document.getElementById('sidebar-list');
+    list.innerHTML = '';
+    const roots = getRoots().slice().reverse(); // newest first
+    if (roots.length === 0) {
+      list.innerHTML = '<div style="color:#484f58;font-size:11px;font-style:italic;padding:8px 4px;">No conversations yet.</div>';
+      return;
+    }
+    for (const rootId of roots) {
+      const run = runs[rootId];
+      const status = getChainTailStatus(rootId);
+      const item = document.createElement('div');
+      item.className = 'sidebar-item' + (rootId === selectedRootId ? ' active' : '');
+      item.onclick = () => selectConversation(rootId);
+
+      const prompt = document.createElement('div');
+      prompt.className = 'sidebar-prompt';
+      prompt.textContent = run.prompt;
+
+      const badge = document.createElement('div');
+      badge.className = 'sidebar-status';
+      badge.innerHTML = statusHtml(status);
+
+      item.appendChild(prompt);
+      item.appendChild(badge);
+      list.appendChild(item);
+    }
+  }
+
+  function statusHtml(status) {
+    const map = {
+      running:          '<span class="s-running"><span class="spin"></span> running</span>',
+      waiting_approval: '<span class="s-waiting_approval">&#x25cf; approval</span>',
+      done:             '<span class="s-done">&#x2713; done</span>',
+      failed:           '<span class="s-failed">&#x2717; failed</span>',
+      policy_denied:    '<span class="s-policy_denied">&#x2717; denied</span>',
+    };
+    return map[status] ?? status;
+  }
+
+  function selectConversation(rootId) {
+    selectedRootId = rootId;
+    render();
+  }
+
+  // ── Main area ──────────────────────────────────────────
+  function renderMain() {
+    const feed = document.getElementById('conversation-feed');
+
+    if (!selectedRootId) {
+      feed.innerHTML = '<div class="empty-hint">Start a new chat or select one from the sidebar.</div>';
+      setInputState(false, 'Ask the agent something\u2026');
+      return;
+    }
+
+    const chain = getChain(selectedRootId);
+    const tailRun = runs[chain[chain.length - 1]];
+    const tailStatus = tailRun?.status;
+
+    const frag = document.createDocumentFragment();
+    for (const runId of chain) {
+      const run = runs[runId];
+      if (!run) continue;
+
+      // User turn
+      const userTurn = document.createElement('div');
+      userTurn.className = 'turn-user';
+      const bubble = document.createElement('div');
+      bubble.className = 'user-bubble';
+      bubble.textContent = run.prompt;
+      userTurn.appendChild(bubble);
+      frag.appendChild(userTurn);
+
+      // Agent turn
+      frag.appendChild(buildAgentTurn(run));
+    }
+
+    feed.innerHTML = '';
+    feed.appendChild(frag);
+    feed.scrollTop = feed.scrollHeight;
+
+    if (tailStatus === 'waiting_approval') {
+      setInputState(true, 'Waiting for approval\u2026');
+    } else if (tailStatus === 'running') {
+      setInputState(true, 'Agent is working\u2026');
+    } else {
+      setInputState(false, 'Continue this chat\u2026');
+    }
+  }
+
+  function buildAgentTurn(run) {
+    const div = document.createElement('div');
+    div.className = 'turn-agent';
+
+    const label = document.createElement('div');
+    label.className = 'agent-label';
+    label.textContent = 'Agent';
+    div.appendChild(label);
+
+    for (const action of (run.history || [])) {
+      div.appendChild(buildCommandCard(action));
+    }
+
+    // Thinking indicator — show while running with no history yet
+    if (run.status === 'running' && (!run.history || run.history.length === 0)) {
+      const t = document.createElement('div');
+      t.className = 'thinking';
+      t.innerHTML = '<span class="spin"></span> Thinking\u2026';
+      div.appendChild(t);
+    }
+
+    // Approval card
+    if (run.status === 'waiting_approval' && run.pending_command) {
+      div.appendChild(buildApprovalCard(run));
+    }
+
+    // Status banner
+    if (['done', 'failed', 'policy_denied'].includes(run.status) && run.final_message) {
+      const banner = document.createElement('div');
+      banner.className = 'status-banner s-' + run.status;
+      banner.textContent = run.final_message;
+      div.appendChild(banner);
+    }
+
+    return div;
+  }
+
+  function buildCommandCard(action) {
+    const card = document.createElement('div');
+    card.className = 'cmd-card';
+
+    const head = document.createElement('div');
+    head.className = 'cmd-head';
+
+    const cmd = document.createElement('span');
+    cmd.className = 'cmd-argv';
+    cmd.textContent = (action.command?.argv ?? []).join(' ');
+    head.appendChild(cmd);
+
+    if (!action.allowed) {
+      const d = document.createElement('span');
+      d.className = 'badge-denied';
+      d.textContent = 'DENIED';
+      head.appendChild(d);
+    } else {
+      if (action.exit_code !== null && action.exit_code !== undefined) {
+        const ec = document.createElement('span');
+        ec.className = action.exit_code === 0 ? 'badge-ok' : 'badge-err';
+        ec.textContent = 'exit ' + action.exit_code;
+        head.appendChild(ec);
+      }
+      const tag = document.createElement('span');
+      tag.className = 'skill-tag' + (action.skill_name ? '' : ' fallback');
+      tag.textContent = action.skill_name ? 'skill: ' + action.skill_name : 'global policy';
+      head.appendChild(tag);
+    }
+    card.appendChild(head);
+
+    if (action.command?.rationale) {
+      const rat = document.createElement('div');
+      rat.className = 'cmd-rationale';
+      rat.textContent = '\u21b3 ' + action.command.rationale;
+      card.appendChild(rat);
+    }
+
+    if (action.stdout || action.stderr) {
+      const details = document.createElement('details');
+      details.className = 'cmd-output';
+      details.open = true;
+      const summary = document.createElement('summary');
+      summary.className = 'cmd-output-toggle';
+      summary.textContent = 'output';
+      details.appendChild(summary);
+      if (action.stdout) {
+        const pre = document.createElement('pre');
+        pre.textContent = action.stdout;
+        details.appendChild(pre);
+      }
+      if (action.stderr) {
+        const pre = document.createElement('pre');
+        pre.className = 'stderr';
+        pre.textContent = action.stderr;
+        details.appendChild(pre);
+      }
+      card.appendChild(details);
+    }
+
+    return card;
+  }
+
+  function buildApprovalCard(run) {
+    const card = document.createElement('div');
+    card.className = 'approval-card';
+
+    const hdr = document.createElement('div');
+    hdr.className = 'approval-header';
+    const dot = document.createElement('span');
+    dot.className = 'approval-dot';
+    hdr.appendChild(dot);
+    hdr.appendChild(document.createTextNode(' Awaiting your approval'));
+    card.appendChild(hdr);
+
+    const body = document.createElement('div');
+    body.className = 'approval-body';
+
+    const cmd = document.createElement('div');
+    cmd.className = 'approval-cmd';
+    cmd.textContent = run.pending_command.argv.join(' ');
+    body.appendChild(cmd);
+
+    const rat = document.createElement('div');
+    rat.className = 'approval-rationale';
+    rat.textContent = '\u21b3 ' + run.pending_command.rationale;
+    body.appendChild(rat);
+
+    const actions = document.createElement('div');
+    actions.className = 'approval-actions';
+
+    const approve = document.createElement('button');
+    approve.className = 'btn-approve';
+    approve.textContent = 'Approve';
+
+    const deny = document.createElement('button');
+    deny.className = 'btn-deny';
+    deny.textContent = 'Deny';
+
+    approve.onclick = async () => {
+      approve.disabled = true; deny.disabled = true;
+      await fetch('/api/agent/runs/' + run.run_id + '/approve', { method: 'POST' });
+      const r = await fetch('/api/agent/runs/' + run.run_id);
+      if (r.ok) { upsertRun(await r.json()); render(); }
+      pollRun(run.run_id);
+    };
+    deny.onclick = async () => {
+      approve.disabled = true; deny.disabled = true;
+      await fetch('/api/agent/runs/' + run.run_id + '/deny', { method: 'POST' });
+      const r = await fetch('/api/agent/runs/' + run.run_id);
+      if (r.ok) { upsertRun(await r.json()); render(); }
+    };
+
+    actions.appendChild(approve);
+    actions.appendChild(deny);
+    body.appendChild(actions);
+    card.appendChild(body);
+    return card;
+  }
+
+  function setInputState(disabled, placeholder) {
+    const input = document.getElementById('prompt-input');
+    const btn   = document.getElementById('run-btn');
+    const wrap  = document.getElementById('input-wrapper');
+    input.disabled = disabled;
+    input.placeholder = placeholder;
+    btn.disabled = disabled;
+    wrap.classList.toggle('disabled', disabled);
+  }
+
+  // ── Submit ─────────────────────────────────────────────
+  async function submitRun() {
+    const input = document.getElementById('prompt-input');
+    const prompt = input.value.trim();
+    if (!prompt) { input.focus(); return; }
+
+    let context_run_id = null;
+    if (selectedRootId) {
+      const chain = getChain(selectedRootId);
+      context_run_id = chain[chain.length - 1];
+    }
+
+    input.value = '';
+    setInputState(true, 'Agent is working\u2026');
+
+    const body = { prompt };
+    if (context_run_id) body.context_run_id = context_run_id;
+
+    try {
+      const res = await fetch('/api/agent/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+
+      upsertRun({
+        run_id: data.run_id,
+        prompt,
+        status: 'running',
+        history: [],
+        parent_run_id: context_run_id,
+      });
+
+      if (!context_run_id) selectedRootId = data.run_id;
+      render();
+      pollRun(data.run_id);
+    } catch (e) {
+      setInputState(false, 'Continue this chat\u2026');
+      alert('Failed to start run: ' + e.message);
+    }
+  }
+
+  // ── New chat ───────────────────────────────────────────
+  function newChat() {
+    selectedRootId = null;
+    render();
+    document.getElementById('prompt-input').focus();
+  }
+
+  // ── Settings ───────────────────────────────────────────
   async function loadSettings() {
     try {
       const res = await fetch('/api/settings');
       if (!res.ok) return;
       const data = await res.json();
-      document.getElementById('approvalToggle').checked = data.approval_required;
-    } catch (_) {}
+      const toggle = document.getElementById('approval-toggle');
+      if (toggle) toggle.checked = data.approval_required;
+    } catch {}
   }
 
   async function onApprovalToggle(checkbox) {
@@ -453,552 +932,25 @@
         body: JSON.stringify({ approval_required: checkbox.checked }),
       });
       if (!res.ok) checkbox.checked = !checkbox.checked;
-    } catch (_) {
-      // revert on network failure
-      checkbox.checked = !checkbox.checked;
-    }
+    } catch { checkbox.checked = !checkbox.checked; }
   }
 
-  async function pollRunOnce(run_id) {
-    try {
-      const res = await fetch('/api/agent/runs/' + run_id);
-      if (!res.ok) return;
-      const data = await res.json();
-      upsertRun(data, false);
-      renderRuns();
-    } catch (_) {}
-  }
-
-  // ── Submit ─────────────────────────────────────────
-  async function submitRun() {
-    const promptEl = document.getElementById('prompt');
-    const btn      = document.getElementById('runBtn');
-    const prompt   = promptEl.value.trim();
-    if (!prompt) { promptEl.focus(); return; }
-
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spin"></span> Starting…';
-
-    try {
-      const res = await fetch('/api/agent/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-
-      promptEl.value = '';
-      upsertRun({ run_id: data.run_id, prompt, status: 'running', history: [] }, true);
-      renderRuns();
-      pollRun(data.run_id);
-    } catch (e) {
-      alert('Failed to start run: ' + e.message);
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = '&#9654;&nbsp; Run';
-    }
-  }
-
-  // ── Polling ────────────────────────────────────────
-  async function pollRun(run_id) {
-    if (polling.has(run_id)) return;
-    polling.add(run_id);
-    while (true) {
-      try {
-        const res = await fetch('/api/agent/runs/' + run_id);
-        if (!res.ok) break;
-        const data = await res.json();
-        upsertRun(data, false);
-        renderRuns();
-        if (data.status !== 'running' && data.status !== 'waiting_approval') break;
-      } catch (_) { break; }
-      await sleep(2000);
-    }
-    polling.delete(run_id);
-  }
-
-  // ── Initial load ───────────────────────────────────
-  async function loadAll() {
+  // ── Skills modal ───────────────────────────────────────
+  async function openSkillsModal() {
+    document.getElementById('skills-modal').classList.remove('hidden');
     await loadSettings();
-    try {
-      const res = await fetch('/api/agent/runs');
-      if (!res.ok) return;
-      const list = await res.json();
-      for (const r of list) {
-        upsertRun(r, false);
-        if (r.status === 'running' || r.status === 'waiting_approval') pollRun(r.run_id);
-      }
-      renderRuns();
-    } catch (_) {}
-
-    // Also load webhook events and start periodic refresh
-    await loadWebhooks();
-    setInterval(loadWebhooks, 5000);
+    await loadSkills();
   }
 
-  // ── Data helpers ───────────────────────────────────
-  function upsertRun(run, prepend) {
-    if (!runData[run.run_id]) {
-      if (prepend) {
-        runOrder.unshift(run.run_id);  // newest first
-      } else {
-        runOrder.push(run.run_id);
-      }
-    }
-    runData[run.run_id] = run;
+  function closeSkillsModal() {
+    document.getElementById('skills-modal').classList.add('hidden');
   }
 
-  // ── Render ─────────────────────────────────────────
-  function renderRuns() {
-    const container = document.getElementById('runsList');
-    document.getElementById('runCount').textContent = runOrder.length;
-
-    if (runOrder.length === 0) {
-      container.innerHTML = '<div class="no-runs-msg">No runs yet. Ask a question above.</div>';
-      return;
-    }
-
-    // Update or insert cards in document order (runOrder[0] = newest)
-    for (const run_id of runOrder) {
-      const run  = runData[run_id];
-      const card = document.getElementById('card-' + run_id);
-      if (card) {
-        updateCard(card, run);
-      } else {
-        const newCard = buildCard(run);
-        container.prepend(newCard); // newest at top only when brand-new card
-      }
-    }
-  }
-
-  // ── Card construction ──────────────────────────────
-  function buildCard(run) {
-    const card = document.createElement('div');
-    card.className = 'run-card';
-    card.id = 'card-' + run.run_id;
-
-    const summary = document.createElement('div');
-    summary.className = 'run-summary';
-    summary.addEventListener('click', () => toggleBody(run.run_id));
-
-    const body = document.createElement('div');
-    body.className = 'run-body collapsed';
-    body.id = 'body-' + run.run_id;
-
-    const chevron = document.createElement('span');
-    chevron.className = 'chevron';
-    chevron.id = 'chev-' + run.run_id;
-    chevron.textContent = '▶';
-
-    summary.appendChild(chevron);
-    card.appendChild(summary);
-    card.appendChild(body);
-
-    populateSummary(summary, run);
-    populateBody(body, run);
-
-    // Auto-expand the most recent run
-    if (runOrder[0] === run.run_id) {
-      body.classList.remove('collapsed');
-      chevron.textContent = '▼';
-    }
-
-    return card;
-  }
-
-  function updateCard(card, run) {
-    const summary = card.querySelector('.run-summary');
-    const body    = card.querySelector('.run-body');
-    const chevron = card.querySelector('.chevron');
-    summary.innerHTML = '';
-    summary.appendChild(chevron);
-    populateSummary(summary, run);
-    populateBody(body, run);
-  }
-
-  function populateSummary(summary, run) {
-    const isActive = run.status === 'running' || run.status === 'waiting_approval';
-    const pill = document.createElement('span');
-    pill.className = 'status-pill s-' + run.status;
-    if (isActive) pill.innerHTML = '<span class="spin"></span>';
-    pill.appendChild(document.createTextNode(run.status));
-
-    const prompt = document.createElement('span');
-    prompt.className = 'run-prompt';
-    prompt.textContent = run.prompt;
-
-    const meta = document.createElement('span');
-    meta.className = 'run-meta';
-    meta.textContent = run.run_id.slice(0, 8);
-
-    summary.appendChild(pill);
-    summary.appendChild(prompt);
-    summary.appendChild(meta);
-  }
-
-  function populateBody(body, run) {
-    body.innerHTML = '';
-
-    // Approval section (shown when waiting for user decision)
-    if (run.status === 'waiting_approval' && run.pending_command) {
-      const sec = document.createElement('div');
-      sec.className = 'approval-section';
-
-      const lbl = document.createElement('div');
-      lbl.className = 'approval-label';
-      lbl.textContent = 'Awaiting Approval';
-
-      const cmd = document.createElement('div');
-      cmd.className = 'approval-cmd';
-      cmd.textContent = run.pending_command.argv.join(' ');
-
-      const rat = document.createElement('div');
-      rat.className = 'approval-rationale';
-      rat.textContent = run.pending_command.rationale;
-
-      const acts = document.createElement('div');
-      acts.className = 'approval-actions';
-
-      const btnApprove = document.createElement('button');
-      btnApprove.className = 'btn-sm btn-approve';
-      btnApprove.textContent = 'Approve';
-      btnApprove.onclick = async () => {
-        btnApprove.disabled = true;
-        btnDeny.disabled = true;
-        await fetch('/api/agent/runs/' + run.run_id + '/approve', { method: 'POST' });
-        await pollRunOnce(run.run_id);
-      };
-
-      const btnDeny = document.createElement('button');
-      btnDeny.className = 'btn-sm btn-deny';
-      btnDeny.textContent = 'Deny';
-      btnDeny.onclick = async () => {
-        btnApprove.disabled = true;
-        btnDeny.disabled = true;
-        await fetch('/api/agent/runs/' + run.run_id + '/deny', { method: 'POST' });
-        await pollRunOnce(run.run_id);
-      };
-
-      acts.appendChild(btnApprove);
-      acts.appendChild(btnDeny);
-      sec.appendChild(lbl);
-      sec.appendChild(cmd);
-      sec.appendChild(rat);
-      sec.appendChild(acts);
-      body.appendChild(sec);
-    }
-
-    if (run.final_message) {
-      const msgBox   = document.createElement('div');
-      msgBox.className = 'final-message';
-      const msgLabel = document.createElement('div');
-      msgLabel.className = 'msg-label';
-      msgLabel.textContent = 'Summary';
-      const msgText  = document.createElement('div');
-      msgText.textContent = run.final_message;
-      msgBox.appendChild(msgLabel);
-      msgBox.appendChild(msgText);
-      body.appendChild(msgBox);
-    }
-
-    const label = document.createElement('div');
-    label.className = 'section-label';
-    label.textContent = 'Executor history';
-    body.appendChild(label);
-
-    if (!run.history || run.history.length === 0) {
-      const msg = document.createElement('div');
-      msg.className = 'empty-state';
-      msg.textContent = (run.status === 'running' || run.status === 'waiting_approval')
-        ? 'Agent is thinking…'
-        : 'No commands were executed.';
-      body.appendChild(msg);
-      return;
-    }
-
-    for (const action of run.history) {
-      body.appendChild(buildActionRow(action));
-    }
-  }
-
-  function buildActionRow(action) {
-    const row  = document.createElement('div');
-    row.className = 'action-row';
-
-    const head = document.createElement('div');
-    head.className = 'action-head';
-
-    const cmd = document.createElement('span');
-    cmd.className = 'action-cmd';
-    cmd.textContent = (action.command?.argv ?? []).join(' ');
-    head.appendChild(cmd);
-
-    if (!action.allowed) {
-      const deny = document.createElement('span');
-      deny.className = 'exit-deny';
-      deny.textContent = 'DENIED: ' + (action.policy_reason ?? 'policy');
-      head.appendChild(deny);
-    } else {
-      if (action.exit_code !== null && action.exit_code !== undefined) {
-        const ec = document.createElement('span');
-        ec.className = action.exit_code === 0 ? 'exit-ok' : 'exit-err';
-        ec.textContent = 'exit ' + action.exit_code;
-        head.appendChild(ec);
-      }
-      const tag = document.createElement('span');
-      if (action.skill_name) {
-        tag.className = 'skill-tag';
-        tag.textContent = 'skill: ' + action.skill_name;
-      } else {
-        tag.className = 'skill-tag fallback';
-        tag.textContent = 'global policy';
-      }
-      head.appendChild(tag);
-    }
-
-    row.appendChild(head);
-
-    if (action.command?.rationale) {
-      const rat = document.createElement('div');
-      rat.className = 'action-rationale';
-      rat.textContent = '↳ ' + action.command.rationale;
-      row.appendChild(rat);
-    }
-
-    if (action.stdout || action.stderr) {
-      const out = document.createElement('div');
-      out.className = 'action-out';
-
-      if (action.stdout) {
-        const lbl = document.createElement('div');
-        lbl.className = 'out-label';
-        lbl.textContent = 'stdout';
-        const content = document.createElement('div');
-        content.className = 'out-content';
-        const pre = document.createElement('pre');
-        pre.textContent = action.stdout;
-        content.appendChild(pre);
-        out.appendChild(lbl);
-        out.appendChild(content);
-      }
-
-      if (action.stderr) {
-        const lbl = document.createElement('div');
-        lbl.className = 'out-label';
-        lbl.textContent = 'stderr';
-        const content = document.createElement('div');
-        content.className = 'out-content';
-        const pre = document.createElement('pre');
-        pre.textContent = action.stderr;
-        content.appendChild(pre);
-        out.appendChild(lbl);
-        out.appendChild(content);
-      }
-
-      row.appendChild(out);
-    }
-
-    return row;
-  }
-
-  function toggleBody(run_id) {
-    const body  = document.getElementById('body-' + run_id);
-    const chev  = document.getElementById('chev-' + run_id);
-    const open  = !body.classList.contains('collapsed');
-    body.classList.toggle('collapsed', open);
-    chev.textContent = open ? '▶' : '▼';
-  }
-
-  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-  // ── Webhook data helpers ───────────────────────────────────
-  function upsertWebhook(evt) {
-    if (!webhookData[evt.event_id]) {
-      webhookOrder.unshift(evt.event_id); // newest first
-    }
-    webhookData[evt.event_id] = evt;
-  }
-
-  // ── Webhook render ─────────────────────────────────────────
-  function renderWebhooks() {
-    const container = document.getElementById('webhooksList');
-    document.getElementById('webhookCount').textContent = webhookOrder.length;
-
-    if (webhookOrder.length === 0) {
-      container.innerHTML = '<div class="no-runs-msg">No webhook events received yet.</div>';
-      return;
-    }
-
-    for (const event_id of webhookOrder) {
-      const evt  = webhookData[event_id];
-      const card = document.getElementById('evcard-' + event_id);
-      if (card) {
-        updateEventCard(card, evt);
-      } else {
-        container.prepend(buildEventCard(evt));
-      }
-    }
-  }
-
-  function buildEventCard(evt) {
-    const card = document.createElement('div');
-    card.className = 'run-card';
-    card.id = 'evcard-' + evt.event_id;
-
-    const summary = document.createElement('div');
-    summary.className = 'run-summary';
-    summary.addEventListener('click', () => toggleEventBody(evt.event_id));
-
-    const body = document.createElement('div');
-    body.className = 'run-body collapsed';
-    body.id = 'evbody-' + evt.event_id;
-
-    const chevron = document.createElement('span');
-    chevron.className = 'chevron';
-    chevron.id = 'evchev-' + evt.event_id;
-    chevron.textContent = '▶';
-
-    summary.appendChild(chevron);
-    card.appendChild(summary);
-    card.appendChild(body);
-
-    populateEventSummary(summary, evt);
-    populateEventBody(body, evt);
-
-    // Auto-expand most recent
-    if (webhookOrder[0] === evt.event_id) {
-      body.classList.remove('collapsed');
-      chevron.textContent = '▼';
-    }
-
-    return card;
-  }
-
-  function updateEventCard(card, evt) {
-    const summary = card.querySelector('.run-summary');
-    const body    = card.querySelector('.run-body');
-    const chevron = card.querySelector('.chevron');
-    summary.innerHTML = '';
-    summary.appendChild(chevron);
-    populateEventSummary(summary, evt);
-    populateEventBody(body, evt);
-  }
-
-  function eventStatus(evt) {
-    if (evt.skipped) return 'skipped';
-    if (!evt.run_id) return 'queued';
-    const run = runData[evt.run_id];
-    return run ? run.status : 'queued';
-  }
-
-  function populateEventSummary(summary, evt) {
-    const status = eventStatus(evt);
-    const isRunning = status === 'running';
-
-    const pill = document.createElement('span');
-    pill.className = 'status-pill s-' + status;
-    if (isRunning) pill.innerHTML = '<span class="spin"></span>';
-    pill.appendChild(document.createTextNode(status));
-
-    const ts = document.createElement('span');
-    ts.className = 'run-prompt';
-    ts.textContent = new Date(evt.received_at).toLocaleString();
-
-    const fp = document.createElement('span');
-    fp.className = 'fp-badge';
-    fp.textContent = evt.fingerprint.slice(0, 8);
-
-    const meta = document.createElement('span');
-    meta.className = 'run-meta';
-    meta.textContent = evt.event_id.slice(0, 8);
-
-    summary.appendChild(pill);
-    summary.appendChild(ts);
-    summary.appendChild(fp);
-    summary.appendChild(meta);
-  }
-
-  function populateEventBody(body, evt) {
-    body.innerHTML = '';
-
-    // Raw payload
-    const payloadLabel = document.createElement('div');
-    payloadLabel.className = 'section-label';
-    payloadLabel.textContent = 'Received payload';
-    body.appendChild(payloadLabel);
-
-    const pre = document.createElement('pre');
-    pre.style.cssText = 'padding:10px;border:1px solid #21262d;border-radius:6px;margin-bottom:14px;';
-    pre.textContent = JSON.stringify(evt.raw_payload, null, 2);
-    body.appendChild(pre);
-
-    // Linked run
-    if (evt.run_id && runData[evt.run_id]) {
-      const runLabel = document.createElement('div');
-      runLabel.className = 'section-label';
-      runLabel.textContent = 'Agent run';
-      body.appendChild(runLabel);
-      const runBody = document.createElement('div');
-      populateBody(runBody, runData[evt.run_id]);
-      body.appendChild(runBody);
-    } else if (!evt.skipped && evt.run_id) {
-      const pending = document.createElement('div');
-      pending.className = 'empty-state';
-      pending.textContent = 'Run not yet started…';
-      body.appendChild(pending);
-    }
-  }
-
-  function toggleEventBody(event_id) {
-    const body = document.getElementById('evbody-' + event_id);
-    const chev = document.getElementById('evchev-' + event_id);
-    const open = !body.classList.contains('collapsed');
-    body.classList.toggle('collapsed', open);
-    chev.textContent = open ? '▶' : '▼';
-  }
-
-  // ── Webhook run polling ────────────────────────────────────
-  async function pollRunForWebhook(run_id) {
-    if (whRunPolling.has(run_id)) return;
-    whRunPolling.add(run_id);
-    while (true) {
-      try {
-        const res = await fetch('/api/agent/runs/' + run_id);
-        if (!res.ok) break;
-        const data = await res.json();
-        upsertRun(data, false);
-        renderWebhooks();
-        renderRuns();
-        if (data.status !== 'running') break;
-      } catch (_) { break; }
-      await sleep(2000);
-    }
-    whRunPolling.delete(run_id);
-  }
-
-  // ── Webhook list polling ───────────────────────────────────
-  async function loadWebhooks() {
-    try {
-      const res = await fetch('/api/agent/webhooks');
-      if (!res.ok) return;
-      const list = await res.json();
-      for (const evt of list) {
-        upsertWebhook(evt);
-        // Start polling the linked run if it's active
-        if (evt.run_id && (!runData[evt.run_id] || runData[evt.run_id].status === 'running')) {
-          pollRunForWebhook(evt.run_id);
-        }
-      }
-      renderWebhooks();
-    } catch (_) {}
-  }
-
-  // ── Boot ───────────────────────────────────────────
-  loadAll();
-
-  // ── Skills ─────────────────────────────────────────────────────────────────
-
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeSkillsModal();
+  });
+
+  // ── Skills CRUD ────────────────────────────────────────
   let skillsData = [];
 
   async function loadSkills() {
@@ -1007,22 +959,17 @@
       if (!res.ok) return;
       skillsData = await res.json();
       renderSkills();
-    } catch (_) {}
+    } catch {}
   }
 
   function renderSkills() {
-    const container = document.getElementById('skillsList');
-    document.getElementById('skillCount').textContent = skillsData.length;
-
+    const container = document.getElementById('skills-list');
     if (skillsData.length === 0) {
-      container.innerHTML = '<div class="no-runs-msg">No skills yet. Add one above to give the agent tools to use.</div>';
+      container.innerHTML = '<div class="no-items-msg">No skills yet.</div>';
       return;
     }
-
     container.innerHTML = '';
-    for (const skill of skillsData) {
-      container.appendChild(buildSkillCard(skill));
-    }
+    for (const skill of skillsData) container.appendChild(buildSkillCard(skill));
   }
 
   function buildSkillCard(skill) {
@@ -1032,46 +979,40 @@
 
     const info = document.createElement('div');
     info.className = 'skill-info';
-
     const name = document.createElement('div');
     name.className = 'skill-name';
     name.textContent = skill.name;
-
     const desc = document.createElement('div');
     desc.className = 'skill-desc';
     desc.textContent = skill.description;
-
+    const badge = document.createElement('span');
+    badge.className = 'policy-badge ' + (skill.policy ? 'has-policy' : 'no-policy');
+    badge.textContent = skill.policy ? 'policy set' : 'no policy';
     info.appendChild(name);
     info.appendChild(desc);
-
-    const policyBadge = document.createElement('span');
-    policyBadge.className = 'policy-badge ' + (skill.policy ? 'has-policy' : 'no-policy');
-    policyBadge.textContent = skill.policy ? 'policy set' : 'no policy';
-    policyBadge.style.marginTop = '6px';
-    policyBadge.style.display = 'inline-block';
-    info.appendChild(policyBadge);
+    info.appendChild(badge);
 
     const actions = document.createElement('div');
     actions.className = 'skill-actions';
 
-    const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'toggle-enabled' + (skill.enabled ? ' on' : '');
-    toggleBtn.textContent = skill.enabled ? 'enabled' : 'disabled';
-    toggleBtn.onclick = () => toggleSkill(skill);
+    const toggle = document.createElement('button');
+    toggle.className = 'toggle-enabled' + (skill.enabled ? ' on' : '');
+    toggle.textContent = skill.enabled ? 'enabled' : 'disabled';
+    toggle.onclick = () => toggleSkill(skill);
 
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn-sm btn-secondary';
-    editBtn.textContent = 'Edit';
-    editBtn.onclick = () => showSkillForm(skill);
+    const edit = document.createElement('button');
+    edit.className = 'btn-sm btn-secondary';
+    edit.textContent = 'Edit';
+    edit.onclick = () => showSkillForm(skill);
 
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn-sm btn-danger';
-    delBtn.textContent = 'Delete';
-    delBtn.onclick = () => deleteSkill(skill.id);
+    const del = document.createElement('button');
+    del.className = 'btn-sm btn-danger';
+    del.textContent = 'Del';
+    del.onclick = () => deleteSkill(skill.id);
 
-    actions.appendChild(toggleBtn);
-    actions.appendChild(editBtn);
-    actions.appendChild(delBtn);
+    actions.appendChild(toggle);
+    actions.appendChild(edit);
+    actions.appendChild(del);
 
     card.appendChild(info);
     card.appendChild(actions);
@@ -1081,7 +1022,6 @@
   function showSkillForm(skill) {
     const container = document.getElementById('skill-form-container');
     const isEdit = !!skill;
-
     const form = document.createElement('div');
     form.className = 'skill-form';
 
@@ -1094,46 +1034,39 @@
     if (skill) nameInput.value = skill.name;
 
     const descLabel = document.createElement('label');
-    descLabel.textContent = 'Description (instructions for the agent)';
+    descLabel.textContent = 'Description';
     const descInput = document.createElement('textarea');
     descInput.id = 'sf-desc';
-    descInput.placeholder = 'Describe how this tool works and how to invoke it...';
+    descInput.placeholder = 'Describe how the agent should use this tool\u2026';
     if (skill) descInput.value = skill.description;
 
     const policyLabel = document.createElement('label');
-    policyLabel.textContent = 'Policy (Rego rules)';
+    policyLabel.textContent = 'Policy (Rego rules \u2014 leave empty to disable)';
     const policyInput = document.createElement('textarea');
     policyInput.id = 'sf-policy';
     policyInput.style.fontFamily = 'ui-monospace, monospace';
-    policyInput.value = (skill && skill.policy) ? skill.policy : 'allow {\n  input.argv[0] == "kubectl"\n}';
+    policyInput.value = (skill?.policy) ?? '';
 
-    const policyHint = document.createElement('div');
-    policyHint.style.cssText = 'font-size:11px;color:#6e7681;margin-top:4px;';
-    policyHint.textContent = 'Leave empty to disable OPA authorization for this skill.';
+    const formActions = document.createElement('div');
+    formActions.className = 'form-actions';
 
-    const actions = document.createElement('div');
-    actions.className = 'form-actions';
+    const save = document.createElement('button');
+    save.className = 'btn-sm btn-secondary';
+    save.textContent = isEdit ? 'Save' : 'Add Skill';
+    save.onclick = isEdit ? () => saveSkill(skill.id) : createSkill;
 
-    const submitBtn = document.createElement('button');
-    submitBtn.textContent = isEdit ? 'Save' : 'Add Skill';
-    submitBtn.onclick = isEdit ? () => saveSkill(skill.id) : createSkill;
+    const cancel = document.createElement('button');
+    cancel.className = 'btn-sm btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.onclick = hideSkillForm;
 
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn-secondary';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.onclick = hideSkillForm;
+    formActions.appendChild(save);
+    formActions.appendChild(cancel);
 
-    actions.appendChild(submitBtn);
-    actions.appendChild(cancelBtn);
-
-    form.appendChild(nameLabel);
-    form.appendChild(nameInput);
-    form.appendChild(descLabel);
-    form.appendChild(descInput);
-    form.appendChild(policyLabel);
-    form.appendChild(policyInput);
-    form.appendChild(policyHint);
-    form.appendChild(actions);
+    form.appendChild(nameLabel);   form.appendChild(nameInput);
+    form.appendChild(descLabel);   form.appendChild(descInput);
+    form.appendChild(policyLabel); form.appendChild(policyInput);
+    form.appendChild(formActions);
 
     container.innerHTML = '';
     container.appendChild(form);
@@ -1143,13 +1076,11 @@
     document.getElementById('skill-form-container').innerHTML = '';
   }
 
-
   async function createSkill() {
     const name   = document.getElementById('sf-name').value.trim();
     const desc   = document.getElementById('sf-desc').value.trim();
     const policy = document.getElementById('sf-policy').value.trim() || null;
     if (!name || !desc) { alert('Name and description are required.'); return; }
-
     const res = await fetch('/api/skills', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1165,7 +1096,6 @@
     const desc   = document.getElementById('sf-desc').value.trim();
     const policy = document.getElementById('sf-policy').value.trim() || null;
     if (!name || !desc) { alert('Name and description are required.'); return; }
-
     const res = await fetch('/api/skills/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -1192,6 +1122,12 @@
     if (!res.ok) { alert('Failed to delete skill.'); return; }
     await loadSkills();
   }
+
+  // ── Utilities ──────────────────────────────────────────
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // ── Boot ───────────────────────────────────────────────
+  loadAll();
 </script>
 </body>
 </html>
