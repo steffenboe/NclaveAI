@@ -49,5 +49,4 @@ class RunContext(BaseModel):
     status: Literal["running", "done", "failed", "policy_denied", "waiting_approval"] = "running"
     final_message: str | None = None
     pending_command: dict[str, Any] | None = None
-    source: Literal["manual", "webhook"] = "manual"
-    event_id: str | None = None
+    parent_run_id: str | None = None

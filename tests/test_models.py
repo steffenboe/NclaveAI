@@ -44,3 +44,13 @@ def test_command_rejects_empty_argv():
         Command(argv=[], rationale="empty argv should be rejected")
 
 
+def test_run_context_parent_run_id_defaults_to_none():
+    ctx = RunContext(run_id="child", prompt="follow up")
+    assert ctx.parent_run_id is None
+
+
+def test_run_context_parent_run_id_can_be_set():
+    ctx = RunContext(run_id="child", prompt="follow up", parent_run_id="parent-123")
+    assert ctx.parent_run_id == "parent-123"
+
+
