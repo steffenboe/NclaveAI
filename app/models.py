@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -32,14 +31,6 @@ class ActionResult(BaseModel):
     stderr: str | None = None
     exit_code: int | None = None
 
-
-class WebhookEvent(BaseModel):
-    event_id: str
-    received_at: datetime
-    raw_payload: dict[str, Any]
-    fingerprint: str        # SHA-256 hex of raw body
-    run_id: str | None = None
-    skipped: bool = False
 
 
 class RunContext(BaseModel):

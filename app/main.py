@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import hashlib
+import copy
 import json
 import logging
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,7 +16,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.executor import CommandExecutor
-from app.models import Command, RunContext, WebhookEvent
+from app.models import Command, RunContext
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 from app.skills import SkillRepository
@@ -34,16 +32,6 @@ _STATIC_DIR = Path(__file__).parent / "static"
 # In-memory stores
 _runs: dict[str, RunContext] = {}
 _runs_lock = threading.Lock()
-
-_events: dict[str, WebhookEvent] = {}
-_events_lock = threading.Lock()
-
-# Active fingerprints: fingerprint → run_id (for deduplication)
-_active_fingerprints: dict[str, str] = {}
-_fp_lock = threading.Lock()
-
-# Worker pool (module-level so tests can patch it)
-_executor = ThreadPoolExecutor(max_workers=3)
 
 # Approval gate state
 _approval_required: bool = False
@@ -92,7 +80,6 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
 async def lifespan(app: FastAPI):
     app.state.skill_repo = SkillRepository(settings.skills_file)
     yield
-    _executor.shutdown(wait=False)
 
 
 app = FastAPI(title="notesllm-agent", version="0.1.0", lifespan=lifespan)
@@ -118,14 +105,11 @@ def _build_workflow(
     )
 
 
-def _fingerprint(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
-
-
 # ── Manual run ────────────────────────────────────────────────────────────────
 
 class RunRequest(BaseModel):
     prompt: str
+    context_run_id: str | None = None
 
 
 class RunResponse(BaseModel):
@@ -150,7 +134,22 @@ class SkillPatchRequest(BaseModel):
 @app.post("/api/agent/run", status_code=202, response_model=RunResponse)
 def start_run(request: RunRequest, req: Request) -> RunResponse:
     run_id = str(uuid.uuid4())
-    ctx = RunContext(run_id=run_id, prompt=request.prompt, source="manual")
+
+    seeded_history: list = []
+    parent_run_id: str | None = None
+    if request.context_run_id is not None:
+        with _runs_lock:
+            parent_ctx = _runs.get(request.context_run_id)
+        if parent_ctx is not None:
+            seeded_history = copy.deepcopy(parent_ctx.history)
+            parent_run_id = request.context_run_id
+
+    ctx = RunContext(
+        run_id=run_id,
+        prompt=request.prompt,
+        history=seeded_history,
+        parent_run_id=parent_run_id,
+    )
     skill_repo = req.app.state.skill_repo
 
     with _runs_lock:
@@ -233,124 +232,6 @@ def deny_command(run_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"No pending approval for run {run_id!r}")
     approval.event.set()  # approved stays False
     return {"status": "denied"}
-
-
-# ── Webhook intake ────────────────────────────────────────────────────────────
-
-class WebhookResponse(BaseModel):
-    event_id: str
-    run_id: str
-    fingerprint: str
-    status: str  # "queued" | "skipped"
-
-
-@app.post("/api/agent/webhook", response_model=WebhookResponse)
-async def receive_webhook(request: Request) -> WebhookResponse:
-    raw = await request.body()
-    try:
-        payload = json.loads(raw)
-    except Exception:
-        payload = {"raw": raw.decode(errors="replace")}
-
-    fp = _fingerprint(raw)
-    event_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
-
-    # Atomic check-and-set: claim the fingerprint slot or detect duplicate
-    run_id = str(uuid.uuid4())
-    with _fp_lock:
-        existing_run_id = _active_fingerprints.get(fp)
-        if existing_run_id is None:
-            _active_fingerprints[fp] = run_id  # claim the slot atomically
-
-    if existing_run_id is not None:
-        evt = WebhookEvent(
-            event_id=event_id,
-            received_at=now,
-            raw_payload=payload,
-            fingerprint=fp,
-            run_id=existing_run_id,
-            skipped=True,
-        )
-        with _events_lock:
-            _events[event_id] = evt
-        return WebhookResponse(
-            event_id=event_id,
-            run_id=existing_run_id,
-            fingerprint=fp,
-            status="skipped",
-        )
-
-    # Create run context
-    prompt = (
-        f"[WEBHOOK EVENT]\n"
-        f"Received at: {now.isoformat()}\n"
-        f"Payload:\n{json.dumps(payload, indent=2)}\n\n"
-        f"Determine if action is required and remediate."
-    )
-    ctx = RunContext(run_id=run_id, prompt=prompt, source="webhook", event_id=event_id)
-
-    evt = WebhookEvent(
-        event_id=event_id,
-        received_at=now,
-        raw_payload=payload,
-        fingerprint=fp,
-        run_id=run_id,
-    )
-
-    with _runs_lock:
-        _runs[run_id] = ctx
-    with _events_lock:
-        _events[event_id] = evt
-
-    skill_repo = request.app.state.skill_repo
-
-    def _execute(run_id: str, prompt: str, fp: str, event_id: str, skill_repo: SkillRepository) -> None:
-        try:
-            # No run_id/ctx passed → approval gate is always None for webhook runs (by design).
-            workflow = _build_workflow(skill_repo)
-            result = workflow.run(
-                prompt=prompt,
-                run_id=run_id,
-                max_iterations=settings.max_iterations,
-            )
-            with _runs_lock:
-                _runs[run_id] = result
-            with _events_lock:
-                if event_id in _events:
-                    _events[event_id].run_id = run_id
-        finally:
-            with _fp_lock:
-                _active_fingerprints.pop(fp, None)
-
-    _executor.submit(_execute, run_id, prompt, fp, event_id, skill_repo)
-
-    return WebhookResponse(
-        event_id=event_id,
-        run_id=run_id,
-        fingerprint=fp,
-        status="queued",
-    )
-
-
-@app.get("/api/agent/webhooks")
-def list_webhooks() -> list[dict]:
-    with _events_lock:
-        sorted_events = sorted(
-            _events.values(),
-            key=lambda e: e.received_at,
-            reverse=True,
-        )
-        return [e.model_dump() for e in sorted_events]
-
-
-@app.get("/api/agent/webhooks/{event_id}")
-def get_webhook(event_id: str) -> Any:
-    with _events_lock:
-        evt = _events.get(event_id)
-    if evt is None:
-        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
-    return evt.model_dump()
 
 
 # ── Skills ────────────────────────────────────────────────────────────────────
