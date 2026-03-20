@@ -282,14 +282,25 @@
     .btn-deny:hover:not(:disabled) { background: #4d2525; }
     .btn-approve:disabled, .btn-deny:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    /* ── Status banner ───────────────────────────────── */
+    /* ── AI summary block (done) ─────────────────────── */
+    .summary-block {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 2px 8px 8px 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #c9d1d9;
+      line-height: 1.6;
+      margin-top: 2px;
+    }
+
+    /* ── Status banner (errors) ──────────────────────── */
     .status-banner {
       border-radius: 6px;
       padding: 9px 13px;
       font-size: 12px;
       margin-top: 4px;
     }
-    .status-banner.s-done          { background: #1a3a2a; border: 1px solid #2ea043; color: #3fb950; }
     .status-banner.s-failed        { background: #3d1f1f; border: 1px solid #8b2a2a; color: #f85149; }
     .status-banner.s-policy_denied { background: #3d2f1f; border: 1px solid #6e4f1f; color: #d29922; }
 
@@ -721,8 +732,16 @@
       div.appendChild(buildApprovalCard(run));
     }
 
-    // Status banner
-    if (['done', 'failed', 'policy_denied'].includes(run.status) && run.final_message) {
+    // AI summary for done runs
+    if (run.status === 'done' && run.final_message) {
+      const summary = document.createElement('div');
+      summary.className = 'summary-block';
+      summary.textContent = run.final_message;
+      div.appendChild(summary);
+    }
+
+    // Error status banners
+    if (['failed', 'policy_denied'].includes(run.status) && run.final_message) {
       const banner = document.createElement('div');
       banner.className = 'status-banner s-' + run.status;
       banner.textContent = run.final_message;
