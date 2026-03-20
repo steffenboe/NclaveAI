@@ -715,7 +715,10 @@
     label.textContent = 'Agent';
     div.appendChild(label);
 
-    for (const action of (run.history || [])) {
+    const parentHistoryLength = run.parent_run_id
+      ? (runs[run.parent_run_id]?.history?.length ?? 0)
+      : 0;
+    for (const action of (run.history || []).slice(parentHistoryLength)) {
       div.appendChild(buildCommandCard(action));
     }
 
