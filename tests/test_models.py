@@ -1,6 +1,4 @@
-from datetime import datetime, timezone
-
-from app.models import Command, PlannerOutput, ActionResult, RunContext, WebhookEvent
+from app.models import Command, PlannerOutput, ActionResult, RunContext
 
 
 def test_command_requires_argv_and_rationale():
@@ -46,24 +44,3 @@ def test_command_rejects_empty_argv():
         Command(argv=[], rationale="empty argv should be rejected")
 
 
-def test_webhook_event_fields():
-    evt = WebhookEvent(
-        event_id="abc",
-        received_at=datetime.now(timezone.utc),
-        raw_payload={"foo": "bar"},
-        fingerprint="deadbeef",
-    )
-    assert evt.run_id is None
-    assert evt.skipped is False
-
-
-def test_run_context_source_default():
-    ctx = RunContext(run_id="x", prompt="p")
-    assert ctx.source == "manual"
-    assert ctx.event_id is None
-
-
-def test_run_context_webhook_source():
-    ctx = RunContext(run_id="x", prompt="p", source="webhook", event_id="evt-1")
-    assert ctx.source == "webhook"
-    assert ctx.event_id == "evt-1"

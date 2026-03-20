@@ -187,7 +187,7 @@ def test_system_prompt_no_tools_fallback(tmp_path):
     planner = Planner.__new__(Planner)
     planner._skill_repo = repo
     prompt = planner._build_system_prompt()
-    assert "No CLI tools" in prompt
+    assert "No specific tools" in prompt
 
 
 def test_next_action_passes_system_prompt_to_chain(tmp_path, ctx_empty):

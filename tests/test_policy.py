@@ -28,17 +28,18 @@ def _cmd(argv: list[str]) -> Command:
 
 
 def test_deny_all_policy_denies_any_command():
-    # The default executor.rego has `default allow = false`
+    # The default executor.rego has `default allow = false`; no skills means global is used.
     evaluator = PolicyEvaluator()
-    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is False
     assert reason is not None
+    assert skill_name is None
 
 
 def test_deny_all_policy_denies_multiple_commands():
     evaluator = PolicyEvaluator()
     for argv in [["gh", "pr", "list"], ["terraform", "plan"], ["rm", "-rf", "/"]]:
-        allowed, _ = evaluator.evaluate(_cmd(argv))
+        allowed, _, _sn = evaluator.evaluate(_cmd(argv))
         assert allowed is False
 
 
@@ -59,12 +60,11 @@ def _skill(policy: str | None) -> Skill:
 
 
 def test_evaluator_returns_none_reason_when_allowed(tmp_path):
-    # Write an allow-all policy and supply a skill that also allows all
     evaluator = PolicyEvaluator(
         policy_path=_allow_all_policy(tmp_path),
         skills=[_skill("allow { true }")],
     )
-    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is True
     assert reason is None
 
@@ -81,39 +81,43 @@ def test_skill_policy_allows_matching_command(tmp_path):
         policy_path=_allow_all_policy(tmp_path),
         skills=[_skill('allow {\n  input.argv[0] == "kubectl"\n}')],
     )
-    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is True
     assert reason is None
+    assert skill_name == "test"
 
 
-def test_skill_policy_denies_non_matching_command(tmp_path):
+def test_skill_policy_non_matching_falls_through_to_global(tmp_path):
+    # Skill only allows kubectl; cmd is gh — falls through to global allow-all.
     evaluator = PolicyEvaluator(
         policy_path=_allow_all_policy(tmp_path),
         skills=[_skill('allow {\n  input.argv[0] == "kubectl"\n}')],
     )
-    allowed, reason = evaluator.evaluate(_cmd(["gh", "pr", "list"]))
-    assert allowed is False
-    assert reason == "No skill policy permits this command"
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["gh", "pr", "list"]))
+    assert allowed is True
+    assert skill_name is None  # global fallback, no skill claimed it
 
 
-def test_no_skill_policy_denies_all(tmp_path):
+def test_no_skill_policy_falls_through_to_global(tmp_path):
+    # Skill has no policy (policy=None) — no skill interp is created; falls through to global.
     evaluator = PolicyEvaluator(
         policy_path=_allow_all_policy(tmp_path),
         skills=[_skill(None)],
     )
-    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
-    assert allowed is False
-    assert reason == "No skill policy permits this command"
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    assert allowed is True
+    assert skill_name is None
 
 
-def test_no_skills_denies_all(tmp_path):
+def test_no_skills_falls_through_to_global(tmp_path):
+    # No skills registered — always falls through to global.
     evaluator = PolicyEvaluator(
         policy_path=_allow_all_policy(tmp_path),
         skills=[],
     )
-    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
-    assert allowed is False
-    assert reason == "No skill policy permits this command"
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    assert allowed is True
+    assert skill_name is None
 
 
 def test_multi_skill_or_semantics(tmp_path):
@@ -124,25 +128,36 @@ def test_multi_skill_or_semantics(tmp_path):
             _skill('allow {\n  input.argv[0] == "gh"\n}'),
         ],
     )
-    allowed, reason = evaluator.evaluate(_cmd(["gh", "pr", "list"]))
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["gh", "pr", "list"]))
     assert allowed is True
     assert reason is None
 
 
-def test_global_deny_takes_priority():
-    # autouse fixture points at executor.rego which has `default allow = false`
+def test_global_deny_applies_when_no_skill_matches():
+    # executor.rego has `default allow = false`; skill only allows kubectl; cmd is gh.
     evaluator = PolicyEvaluator(
         skills=[_skill('allow {\n  input.argv[0] == "kubectl"\n}')],
     )
-    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["gh", "pr", "list"]))
     assert allowed is False
     assert "denied by policy" in reason
+    assert skill_name is None
+
+
+def test_skill_allow_takes_priority_over_global_deny():
+    # executor.rego denies everything, but skill explicitly allows kubectl.
+    evaluator = PolicyEvaluator(
+        skills=[_skill('allow {\n  input.argv[0] == "kubectl"\n}')],
+    )
+    allowed, reason, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    assert allowed is True
+    assert skill_name == "test"
 
 
 def test_policy_path_defaults_to_settings():
-    # autouse fixture sets settings.policy_path to a valid path;
-    # calling with no policy_path must not raise
+    # autouse fixture sets settings.policy_path to executor.rego;
+    # skill "allow { true }" wins → no exception raised, command is allowed.
     evaluator = PolicyEvaluator(skills=[_skill("allow { true }")])
-    allowed, _ = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
-    # executor.rego denies everything — just verifying no exception raised
-    assert allowed is False
+    allowed, _, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    assert allowed is True
+    assert skill_name == "test"
