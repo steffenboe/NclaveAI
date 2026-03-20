@@ -116,6 +116,7 @@
     .s-done          { background: #1a3a2a; color: #3fb950; }
     .s-failed        { background: #3d1f1f; color: #f85149; }
     .s-policy_denied { background: #3d2f1f; color: #d29922; }
+    .s-waiting_approval { background: #2d1f5e; color: #a371f7; }
 
     .run-prompt { flex: 1; color: #e6edf3; word-break: break-word; }
     .run-meta   { flex-shrink: 0; color: #484f58; font-size: 12px; white-space: nowrap; }
@@ -147,6 +148,63 @@
     .exit-ok   { color: #3fb950; font-size: 12px; }
     .exit-err  { color: #f85149; font-size: 12px; }
     .exit-deny { color: #d29922; font-size: 12px; }
+
+    .skill-tag {
+      font-size: 11px;
+      border-radius: 4px;
+      padding: 1px 7px;
+      background: #1a2d3f;
+      color: #58a6ff;
+      border: 1px solid #1f4a6e;
+      flex-shrink: 0;
+    }
+    .skill-tag.fallback {
+      background: #21262d;
+      color: #6e7681;
+      border-color: #30363d;
+    }
+    .action-rationale {
+      font-size: 11px;
+      color: #6e7681;
+      padding: 4px 12px 6px;
+      border-top: 1px solid #21262d;
+      background: #0d1117;
+      font-style: italic;
+    }
+
+    /* ── Approval section ───────────────────────────────────── */
+    .approval-section {
+      border: 1px solid #a371f7;
+      border-radius: 6px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      background: #1a1030;
+    }
+    .approval-label {
+      color: #a371f7;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .approval-cmd {
+      color: #79c0ff;
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+    .approval-cmd::before { content: "$ "; color: #484f58; }
+    .approval-rationale {
+      color: #6e7681;
+      font-size: 12px;
+      font-style: italic;
+      margin-bottom: 10px;
+    }
+    .approval-actions { display: flex; gap: 8px; }
+    .btn-approve { background: #1a3a2a; border: 1px solid #2ea043; color: #3fb950; }
+    .btn-approve:hover:not(:disabled) { background: #1f4a35; }
+    .btn-deny { background: #3d1f1f; border: 1px solid #8b2a2a; color: #f85149; }
+    .btn-deny:hover:not(:disabled) { background: #4d2525; }
 
     .action-out {
       padding: 8px 12px;
@@ -243,26 +301,83 @@
       font-family: inherit;
       flex-shrink: 0;
     }
+
+    /* ── Skills ─────────────────────────────────────────────── */
+    .skill-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .skill-info { flex: 1; min-width: 0; }
+    .skill-name { color: #79c0ff; font-weight: 600; margin-bottom: 4px; }
+    .skill-desc { color: #8b949e; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .skill-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; font-weight: 500; }
+    .btn-danger { background: #6e2323; }
+    .btn-danger:hover:not(:disabled) { background: #8b2a2a; }
+    .toggle-enabled { cursor: pointer; font-size: 12px; color: #8b949e; padding: 4px 10px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; font-family: inherit; }
+    .toggle-enabled.on { color: #3fb950; border-color: #2ea043; background: #1a3a2a; }
+
+    .policy-badge { font-size: 11px; border-radius: 4px; padding: 1px 7px; font-weight: 500; flex-shrink: 0; }
+    .policy-badge.has-policy { background: #1a3a2a; color: #3fb950; }
+    .policy-badge.no-policy  { background: #21262d; color: #6e7681; }
+
+    .skill-form {
+      background: #161b22;
+      border: 1px solid #58a6ff;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .skill-form label { display: block; color: #8b949e; font-size: 12px; margin-bottom: 4px; margin-top: 10px; }
+    .skill-form label:first-of-type { margin-top: 0; }
+    .skill-form input[type="text"] {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 13px;
+    }
+    .skill-form input[type="text"]:focus { outline: none; border-color: #58a6ff; }
+    .skill-form textarea {
+      min-height: 120px;
+    }
+    .form-actions { display: flex; gap: 8px; margin-top: 14px; }
+    .btn-secondary { background: #21262d; border: 1px solid #30363d; }
+    .btn-secondary:hover:not(:disabled) { background: #2d333b; }
   </style>
 </head>
 <body>
 <div class="container">
 
   <header>
-    <h1>notesllm Agent</h1>
-    <p>Kubernetes operations agent — ask a question and watch it work.</p>
+    <h1>Developer Companion</h1>
+    <p>Personal agent — ask a question and watch it work.</p>
   </header>
 
   <div class="tabs">
     <button class="tab-btn active" data-tab="manual" onclick="switchTab('manual')">Manual Runs</button>
     <button class="tab-btn" data-tab="webhooks" onclick="switchTab('webhooks')">Webhook Events</button>
+    <button class="tab-btn" data-tab="skills" onclick="switchTab('skills')">Skills</button>
   </div>
 
   <div id="panel-manual" class="tab-panel active">
     <div class="query-box">
       <textarea id="prompt" placeholder="e.g. Show me the status of all deployments in the notesllm namespace"></textarea>
       <div class="form-footer">
-        <span class="form-hint">OPA role: <span id="currentRole">INFRA_OBSERVER</span></span>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:#6e7681;font-size:12px;">
+          <input type="checkbox" id="approvalToggle" onchange="onApprovalToggle(this)"
+                 style="accent-color:#a371f7;cursor:pointer;" />
+          Require approval before each command
+        </label>
         <button id="runBtn" onclick="submitRun()">&#9654;&nbsp; Run</button>
       </div>
     </div>
@@ -280,6 +395,20 @@
       <span class="badge" id="webhookCount">0</span>
     </div>
     <div id="webhooksList"></div>
+  </div>
+
+  <div id="panel-skills" class="tab-panel">
+    <div id="skill-form-container"></div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <h2 style="font-size:15px;color:#e6edf3;">Skills</h2>
+        <span class="badge" id="skillCount">0</span>
+      </div>
+      <button class="btn-sm" onclick="showSkillForm()">+ Add Skill</button>
+    </div>
+
+    <div id="skillsList"></div>
   </div>
 
 </div>
@@ -302,6 +431,42 @@
     });
     document.getElementById('panel-manual').classList.toggle('active', tab === 'manual');
     document.getElementById('panel-webhooks').classList.toggle('active', tab === 'webhooks');
+    document.getElementById('panel-skills').classList.toggle('active', tab === 'skills');
+    if (tab === 'skills') loadSkills();
+  }
+
+  // ── Settings ───────────────────────────────────────────────
+  async function loadSettings() {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const data = await res.json();
+      document.getElementById('approvalToggle').checked = data.approval_required;
+    } catch (_) {}
+  }
+
+  async function onApprovalToggle(checkbox) {
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approval_required: checkbox.checked }),
+      });
+      if (!res.ok) checkbox.checked = !checkbox.checked;
+    } catch (_) {
+      // revert on network failure
+      checkbox.checked = !checkbox.checked;
+    }
+  }
+
+  async function pollRunOnce(run_id) {
+    try {
+      const res = await fetch('/api/agent/runs/' + run_id);
+      if (!res.ok) return;
+      const data = await res.json();
+      upsertRun(data, false);
+      renderRuns();
+    } catch (_) {}
   }
 
   // ── Submit ─────────────────────────────────────────
@@ -346,7 +511,7 @@
         const data = await res.json();
         upsertRun(data, false);
         renderRuns();
-        if (data.status !== 'running') break;
+        if (data.status !== 'running' && data.status !== 'waiting_approval') break;
       } catch (_) { break; }
       await sleep(2000);
     }
@@ -355,13 +520,14 @@
 
   // ── Initial load ───────────────────────────────────
   async function loadAll() {
+    await loadSettings();
     try {
       const res = await fetch('/api/agent/runs');
       if (!res.ok) return;
       const list = await res.json();
       for (const r of list) {
         upsertRun(r, false);
-        if (r.status === 'running') pollRun(r.run_id);
+        if (r.status === 'running' || r.status === 'waiting_approval') pollRun(r.run_id);
       }
       renderRuns();
     } catch (_) {}
@@ -452,10 +618,10 @@
   }
 
   function populateSummary(summary, run) {
-    const isRunning = run.status === 'running';
+    const isActive = run.status === 'running' || run.status === 'waiting_approval';
     const pill = document.createElement('span');
     pill.className = 'status-pill s-' + run.status;
-    if (isRunning) pill.innerHTML = '<span class="spin"></span>';
+    if (isActive) pill.innerHTML = '<span class="spin"></span>';
     pill.appendChild(document.createTextNode(run.status));
 
     const prompt = document.createElement('span');
@@ -473,6 +639,55 @@
 
   function populateBody(body, run) {
     body.innerHTML = '';
+
+    // Approval section (shown when waiting for user decision)
+    if (run.status === 'waiting_approval' && run.pending_command) {
+      const sec = document.createElement('div');
+      sec.className = 'approval-section';
+
+      const lbl = document.createElement('div');
+      lbl.className = 'approval-label';
+      lbl.textContent = 'Awaiting Approval';
+
+      const cmd = document.createElement('div');
+      cmd.className = 'approval-cmd';
+      cmd.textContent = run.pending_command.argv.join(' ');
+
+      const rat = document.createElement('div');
+      rat.className = 'approval-rationale';
+      rat.textContent = run.pending_command.rationale;
+
+      const acts = document.createElement('div');
+      acts.className = 'approval-actions';
+
+      const btnApprove = document.createElement('button');
+      btnApprove.className = 'btn-sm btn-approve';
+      btnApprove.textContent = 'Approve';
+      btnApprove.onclick = async () => {
+        btnApprove.disabled = true;
+        btnDeny.disabled = true;
+        await fetch('/api/agent/runs/' + run.run_id + '/approve', { method: 'POST' });
+        await pollRunOnce(run.run_id);
+      };
+
+      const btnDeny = document.createElement('button');
+      btnDeny.className = 'btn-sm btn-deny';
+      btnDeny.textContent = 'Deny';
+      btnDeny.onclick = async () => {
+        btnApprove.disabled = true;
+        btnDeny.disabled = true;
+        await fetch('/api/agent/runs/' + run.run_id + '/deny', { method: 'POST' });
+        await pollRunOnce(run.run_id);
+      };
+
+      acts.appendChild(btnApprove);
+      acts.appendChild(btnDeny);
+      sec.appendChild(lbl);
+      sec.appendChild(cmd);
+      sec.appendChild(rat);
+      sec.appendChild(acts);
+      body.appendChild(sec);
+    }
 
     if (run.final_message) {
       const msgBox   = document.createElement('div');
@@ -495,7 +710,7 @@
     if (!run.history || run.history.length === 0) {
       const msg = document.createElement('div');
       msg.className = 'empty-state';
-      msg.textContent = run.status === 'running'
+      msg.textContent = (run.status === 'running' || run.status === 'waiting_approval')
         ? 'Agent is thinking…'
         : 'No commands were executed.';
       body.appendChild(msg);
@@ -524,14 +739,32 @@
       deny.className = 'exit-deny';
       deny.textContent = 'DENIED: ' + (action.policy_reason ?? 'policy');
       head.appendChild(deny);
-    } else if (action.exit_code !== null && action.exit_code !== undefined) {
-      const ec = document.createElement('span');
-      ec.className = action.exit_code === 0 ? 'exit-ok' : 'exit-err';
-      ec.textContent = 'exit ' + action.exit_code;
-      head.appendChild(ec);
+    } else {
+      if (action.exit_code !== null && action.exit_code !== undefined) {
+        const ec = document.createElement('span');
+        ec.className = action.exit_code === 0 ? 'exit-ok' : 'exit-err';
+        ec.textContent = 'exit ' + action.exit_code;
+        head.appendChild(ec);
+      }
+      const tag = document.createElement('span');
+      if (action.skill_name) {
+        tag.className = 'skill-tag';
+        tag.textContent = 'skill: ' + action.skill_name;
+      } else {
+        tag.className = 'skill-tag fallback';
+        tag.textContent = 'global policy';
+      }
+      head.appendChild(tag);
     }
 
     row.appendChild(head);
+
+    if (action.command?.rationale) {
+      const rat = document.createElement('div');
+      rat.className = 'action-rationale';
+      rat.textContent = '↳ ' + action.command.rationale;
+      row.appendChild(rat);
+    }
 
     if (action.stdout || action.stderr) {
       const out = document.createElement('div');
@@ -763,6 +996,202 @@
 
   // ── Boot ───────────────────────────────────────────
   loadAll();
+
+  // ── Skills ─────────────────────────────────────────────────────────────────
+
+  let skillsData = [];
+
+  async function loadSkills() {
+    try {
+      const res = await fetch('/api/skills');
+      if (!res.ok) return;
+      skillsData = await res.json();
+      renderSkills();
+    } catch (_) {}
+  }
+
+  function renderSkills() {
+    const container = document.getElementById('skillsList');
+    document.getElementById('skillCount').textContent = skillsData.length;
+
+    if (skillsData.length === 0) {
+      container.innerHTML = '<div class="no-runs-msg">No skills yet. Add one above to give the agent tools to use.</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    for (const skill of skillsData) {
+      container.appendChild(buildSkillCard(skill));
+    }
+  }
+
+  function buildSkillCard(skill) {
+    const card = document.createElement('div');
+    card.className = 'skill-card';
+    card.id = 'skill-' + skill.id;
+
+    const info = document.createElement('div');
+    info.className = 'skill-info';
+
+    const name = document.createElement('div');
+    name.className = 'skill-name';
+    name.textContent = skill.name;
+
+    const desc = document.createElement('div');
+    desc.className = 'skill-desc';
+    desc.textContent = skill.description;
+
+    info.appendChild(name);
+    info.appendChild(desc);
+
+    const policyBadge = document.createElement('span');
+    policyBadge.className = 'policy-badge ' + (skill.policy ? 'has-policy' : 'no-policy');
+    policyBadge.textContent = skill.policy ? 'policy set' : 'no policy';
+    policyBadge.style.marginTop = '6px';
+    policyBadge.style.display = 'inline-block';
+    info.appendChild(policyBadge);
+
+    const actions = document.createElement('div');
+    actions.className = 'skill-actions';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'toggle-enabled' + (skill.enabled ? ' on' : '');
+    toggleBtn.textContent = skill.enabled ? 'enabled' : 'disabled';
+    toggleBtn.onclick = () => toggleSkill(skill);
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn-sm btn-secondary';
+    editBtn.textContent = 'Edit';
+    editBtn.onclick = () => showSkillForm(skill);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-sm btn-danger';
+    delBtn.textContent = 'Delete';
+    delBtn.onclick = () => deleteSkill(skill.id);
+
+    actions.appendChild(toggleBtn);
+    actions.appendChild(editBtn);
+    actions.appendChild(delBtn);
+
+    card.appendChild(info);
+    card.appendChild(actions);
+    return card;
+  }
+
+  function showSkillForm(skill) {
+    const container = document.getElementById('skill-form-container');
+    const isEdit = !!skill;
+
+    const form = document.createElement('div');
+    form.className = 'skill-form';
+
+    const nameLabel = document.createElement('label');
+    nameLabel.textContent = 'Tool name';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.id = 'sf-name';
+    nameInput.placeholder = 'e.g. kubectl';
+    if (skill) nameInput.value = skill.name;
+
+    const descLabel = document.createElement('label');
+    descLabel.textContent = 'Description (instructions for the agent)';
+    const descInput = document.createElement('textarea');
+    descInput.id = 'sf-desc';
+    descInput.placeholder = 'Describe how this tool works and how to invoke it...';
+    if (skill) descInput.value = skill.description;
+
+    const policyLabel = document.createElement('label');
+    policyLabel.textContent = 'Policy (Rego rules)';
+    const policyInput = document.createElement('textarea');
+    policyInput.id = 'sf-policy';
+    policyInput.style.fontFamily = 'ui-monospace, monospace';
+    policyInput.value = (skill && skill.policy) ? skill.policy : 'allow {\n  input.argv[0] == "kubectl"\n}';
+
+    const policyHint = document.createElement('div');
+    policyHint.style.cssText = 'font-size:11px;color:#6e7681;margin-top:4px;';
+    policyHint.textContent = 'Leave empty to disable OPA authorization for this skill.';
+
+    const actions = document.createElement('div');
+    actions.className = 'form-actions';
+
+    const submitBtn = document.createElement('button');
+    submitBtn.textContent = isEdit ? 'Save' : 'Add Skill';
+    submitBtn.onclick = isEdit ? () => saveSkill(skill.id) : createSkill;
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = hideSkillForm;
+
+    actions.appendChild(submitBtn);
+    actions.appendChild(cancelBtn);
+
+    form.appendChild(nameLabel);
+    form.appendChild(nameInput);
+    form.appendChild(descLabel);
+    form.appendChild(descInput);
+    form.appendChild(policyLabel);
+    form.appendChild(policyInput);
+    form.appendChild(policyHint);
+    form.appendChild(actions);
+
+    container.innerHTML = '';
+    container.appendChild(form);
+  }
+
+  function hideSkillForm() {
+    document.getElementById('skill-form-container').innerHTML = '';
+  }
+
+
+  async function createSkill() {
+    const name   = document.getElementById('sf-name').value.trim();
+    const desc   = document.getElementById('sf-desc').value.trim();
+    const policy = document.getElementById('sf-policy').value.trim() || null;
+    if (!name || !desc) { alert('Name and description are required.'); return; }
+
+    const res = await fetch('/api/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description: desc, policy }),
+    });
+    if (!res.ok) { alert('Failed to create skill.'); return; }
+    hideSkillForm();
+    await loadSkills();
+  }
+
+  async function saveSkill(id) {
+    const name   = document.getElementById('sf-name').value.trim();
+    const desc   = document.getElementById('sf-desc').value.trim();
+    const policy = document.getElementById('sf-policy').value.trim() || null;
+    if (!name || !desc) { alert('Name and description are required.'); return; }
+
+    const res = await fetch('/api/skills/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description: desc, policy }),
+    });
+    if (!res.ok) { alert('Failed to save skill.'); return; }
+    hideSkillForm();
+    await loadSkills();
+  }
+
+  async function toggleSkill(skill) {
+    const res = await fetch('/api/skills/' + skill.id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !skill.enabled }),
+    });
+    if (!res.ok) { alert('Failed to toggle skill.'); return; }
+    await loadSkills();
+  }
+
+  async function deleteSkill(id) {
+    if (!confirm('Delete this skill?')) return;
+    const res = await fetch('/api/skills/' + id, { method: 'DELETE' });
+    if (!res.ok) { alert('Failed to delete skill.'); return; }
+    await loadSkills();
+  }
 </script>
 </body>
 </html>

@@ -1,8 +1,10 @@
 import pytest
 from unittest.mock import MagicMock
+from datetime import datetime, timezone
 
 from app.models import ActionResult, Command, PlannerOutput, RunContext
 from app.planner import Planner, _format_history
+from app.skills import Skill, SkillRepository
 
 
 def _make_command(argv=None):
@@ -33,7 +35,7 @@ def ctx_with_history():
     )
 
 
-def test_planner_returns_planner_output(ctx_empty):
+def test_planner_returns_planner_output(tmp_path, ctx_empty):
     mock_chain = MagicMock()
     mock_chain.invoke.return_value = PlannerOutput(
         status="action",
@@ -42,6 +44,7 @@ def test_planner_returns_planner_output(ctx_empty):
     )
     planner = Planner.__new__(Planner)
     planner._chain = mock_chain
+    planner._skill_repo = SkillRepository(tmp_path / "skills.json")
     result = planner.next_action(ctx_empty)
     assert isinstance(result, PlannerOutput)
     assert result.status == "action"
@@ -49,7 +52,7 @@ def test_planner_returns_planner_output(ctx_empty):
     mock_chain.invoke.assert_called_once()
 
 
-def test_planner_can_return_done(ctx_with_history):
+def test_planner_can_return_done(tmp_path, ctx_with_history):
     mock_chain = MagicMock()
     mock_chain.invoke.return_value = PlannerOutput(
         status="done",
@@ -58,18 +61,20 @@ def test_planner_can_return_done(ctx_with_history):
     )
     planner = Planner.__new__(Planner)
     planner._chain = mock_chain
+    planner._skill_repo = SkillRepository(tmp_path / "skills.json")
     result = planner.next_action(ctx_with_history)
     assert result.status == "done"
     assert result.command is None
 
 
-def test_planner_passes_history_to_llm(ctx_with_history):
+def test_planner_passes_history_to_llm(tmp_path, ctx_with_history):
     mock_chain = MagicMock()
     mock_chain.invoke.return_value = PlannerOutput(
         status="done", command=None, summary="done"
     )
     planner = Planner.__new__(Planner)
     planner._chain = mock_chain
+    planner._skill_repo = SkillRepository(tmp_path / "skills.json")
     planner.next_action(ctx_with_history)
     call_kwargs = mock_chain.invoke.call_args[0][0]
     assert "history_str" in call_kwargs
@@ -125,3 +130,76 @@ def test_webhook_prompt_prefix_included_in_history_format():
     )
     # The prompt must start with the sentinel
     assert ctx.prompt.startswith("[WEBHOOK EVENT]")
+
+
+def _make_skill(name: str, description: str, enabled: bool = True) -> Skill:
+    return Skill(
+        id="test-id",
+        name=name,
+        description=description,
+        enabled=enabled,
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+def _repo_with_skills(tmp_path, skills: list[Skill]) -> SkillRepository:
+    repo = SkillRepository(tmp_path / "skills.json")
+    for s in skills:
+        repo.create(name=s.name, description=s.description, enabled=s.enabled)
+    return repo
+
+
+def test_system_prompt_includes_skill_name(tmp_path):
+    repo = _repo_with_skills(tmp_path, [_make_skill("kubectl", "Kubernetes CLI")])
+    planner = Planner.__new__(Planner)
+    planner._skill_repo = repo
+    prompt = planner._build_system_prompt()
+    assert "[kubectl]" in prompt
+    assert "Kubernetes CLI" in prompt
+
+
+def test_system_prompt_includes_multiple_skills(tmp_path):
+    repo = _repo_with_skills(tmp_path, [
+        _make_skill("kubectl", "k8s cli"),
+        _make_skill("gh", "GitHub CLI"),
+    ])
+    planner = Planner.__new__(Planner)
+    planner._skill_repo = repo
+    prompt = planner._build_system_prompt()
+    assert "[kubectl]" in prompt
+    assert "[gh]" in prompt
+
+
+def test_system_prompt_excludes_disabled_skills(tmp_path):
+    repo = _repo_with_skills(tmp_path, [
+        _make_skill("kubectl", "k8s cli", enabled=True),
+        _make_skill("gh", "GitHub CLI", enabled=False),
+    ])
+    planner = Planner.__new__(Planner)
+    planner._skill_repo = repo
+    prompt = planner._build_system_prompt()
+    assert "[kubectl]" in prompt
+    assert "[gh]" not in prompt
+
+
+def test_system_prompt_no_tools_fallback(tmp_path):
+    repo = SkillRepository(tmp_path / "skills.json")  # empty
+    planner = Planner.__new__(Planner)
+    planner._skill_repo = repo
+    prompt = planner._build_system_prompt()
+    assert "No CLI tools" in prompt
+
+
+def test_next_action_passes_system_prompt_to_chain(tmp_path, ctx_empty):
+    repo = _repo_with_skills(tmp_path, [_make_skill("kubectl", "k8s cli")])
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value = PlannerOutput(
+        status="done", command=None, summary="done"
+    )
+    planner = Planner.__new__(Planner)
+    planner._chain = mock_chain
+    planner._skill_repo = repo
+    planner.next_action(ctx_empty)
+    call_kwargs = mock_chain.invoke.call_args[0][0]
+    assert "system_prompt" in call_kwargs
+    assert "[kubectl]" in call_kwargs["system_prompt"]

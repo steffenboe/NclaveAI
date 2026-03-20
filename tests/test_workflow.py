@@ -30,7 +30,7 @@ def workflow():
     mock_planner.summarize.return_value = "Test summary."
     mock_executor = MagicMock()
     mock_policy = MagicMock()
-    mock_policy.evaluate.return_value = (True, None)
+    mock_policy.evaluate.return_value = (True, None, None)
     return AgentWorkflow(
         planner=mock_planner,
         policy=mock_policy,
@@ -54,7 +54,7 @@ def test_workflow_stops_on_policy_denial(workflow):
     workflow._planner.next_action.return_value = _planner_output(
         status="action", argv=["kubectl", "rollout", "restart", "deployment/backend"]
     )
-    workflow._policy.evaluate.return_value = (False, "Not permitted")
+    workflow._policy.evaluate.return_value = (False, "Not permitted", None)
     ctx = workflow.run("restart backend", "run-2")
     assert ctx.status == "policy_denied"
     workflow._executor.run.assert_not_called()
@@ -97,7 +97,7 @@ def test_workflow_does_not_execute_when_denied(workflow):
     workflow._planner.next_action.return_value = _planner_output(
         status="action", argv=["kubectl", "scale", "deployment/backend", "--replicas=3"]
     )
-    workflow._policy.evaluate.return_value = (False, "Scale not allowed")
+    workflow._policy.evaluate.return_value = (False, "Scale not allowed", None)
     ctx = workflow.run("scale up", "run-6")
     assert ctx.status == "policy_denied"
     assert len(ctx.history) == 0
@@ -185,3 +185,146 @@ def test_workflow_survives_summarize_failure(workflow):
     ctx = workflow.run("diagnose", "run-11")
     assert ctx.status == "done"
     assert ctx.final_message is None
+
+
+def test_runcontext_accepts_waiting_approval_status():
+    ctx = RunContext(run_id="r1", prompt="p")
+    ctx.status = "waiting_approval"
+    assert ctx.status == "waiting_approval"
+
+
+def test_runcontext_pending_command_defaults_to_none():
+    ctx = RunContext(run_id="r1", prompt="p")
+    assert ctx.pending_command is None
+
+
+def test_runcontext_pending_command_can_be_set():
+    ctx = RunContext(run_id="r1", prompt="p")
+    ctx.pending_command = {"argv": ["ls"], "rationale": "check"}
+    assert ctx.pending_command["argv"] == ["ls"]
+
+
+# ── Approval gate tests ────────────────────────────────────────────────────
+
+def test_workflow_approval_gate_approve_allows_execution():
+    """Gate returning True → command executes normally."""
+    mock_planner = MagicMock()
+    mock_planner.summarize.return_value = "done"
+    mock_policy = MagicMock()
+    mock_policy.evaluate.return_value = (True, None, None)
+    mock_executor = MagicMock()
+    mock_executor.run.return_value = _action_result()
+
+    mock_planner.next_action.side_effect = [
+        _planner_output(status="action"),
+        _planner_output(status="done"),
+    ]
+
+    gate = MagicMock(return_value=True)
+    wf = AgentWorkflow(
+        planner=mock_planner,
+        policy=mock_policy,
+        executor=mock_executor,
+        approval_gate=gate,
+    )
+    ctx = wf.run("fix pod", "run-gate-approve")
+    assert ctx.status == "done"
+    gate.assert_called_once()
+    gate_call_arg = gate.call_args[0][0]
+    assert isinstance(gate_call_arg, Command)
+    mock_executor.run.assert_called_once()
+
+
+def test_workflow_approval_gate_deny_stops_execution():
+    """Gate returning False → policy_denied, executor never called."""
+    mock_planner = MagicMock()
+    mock_policy = MagicMock()
+    mock_policy.evaluate.return_value = (True, None, None)
+    mock_executor = MagicMock()
+
+    mock_planner.next_action.return_value = _planner_output(status="action")
+
+    gate = MagicMock(return_value=False)
+    wf = AgentWorkflow(
+        planner=mock_planner,
+        policy=mock_policy,
+        executor=mock_executor,
+        approval_gate=gate,
+    )
+    ctx = wf.run("fix pod", "run-gate-deny")
+    assert ctx.status == "policy_denied"
+    gate.assert_called_once()
+    mock_executor.run.assert_not_called()
+
+
+def test_workflow_no_gate_executes_normally(workflow):
+    """No gate → existing behaviour unchanged."""
+    workflow._planner.next_action.side_effect = [
+        _planner_output(status="action"),
+        _planner_output(status="done"),
+    ]
+    workflow._executor.run.return_value = _action_result()
+    ctx = workflow.run("fix pod", "run-no-gate")
+    assert ctx.status == "done"
+    assert len(ctx.history) == 1
+
+
+def test_workflow_run_accepts_prebuilt_ctx():
+    """Passing ctx= reuses the object and returns the same instance."""
+    mock_planner = MagicMock()
+    mock_planner.summarize.return_value = "done"
+    mock_policy = MagicMock()
+    mock_policy.evaluate.return_value = (True, None, None)
+    mock_executor = MagicMock()
+    mock_executor.run.return_value = _action_result()
+    mock_planner.next_action.side_effect = [
+        _planner_output(status="action"),
+        _planner_output(status="done"),
+    ]
+
+    wf = AgentWorkflow(planner=mock_planner, policy=mock_policy, executor=mock_executor)
+    ctx = RunContext(run_id="r-ctx", prompt="p")
+    result = wf.run(prompt="p", ctx=ctx)
+    assert result is ctx   # same object
+    assert ctx.status == "done"
+
+
+def test_workflow_policy_denied_sets_hardcoded_final_message(workflow):
+    """policy_denied → final_message is hardcoded, summarize not called."""
+    workflow._planner.next_action.return_value = _planner_output(status="action")
+    workflow._policy.evaluate.return_value = (False, "Not permitted", None)
+    ctx = workflow.run("fix", "run-denied-msg")
+    assert ctx.status == "policy_denied"
+    assert ctx.final_message == "Run stopped: a command was not approved."
+    workflow._planner.summarize.assert_not_called()
+
+
+def test_api_get_settings_returns_approval_required():
+    client = TestClient(fastapi_app)
+    response = client.get("/api/settings")
+    assert response.status_code == 200
+    body = response.json()
+    assert "approval_required" in body
+    assert body["approval_required"] is False  # default
+
+
+def test_api_put_settings_updates_approval_required():
+    client = TestClient(fastapi_app)
+    # turn on
+    r = client.put("/api/settings", json={"approval_required": True})
+    assert r.status_code == 200
+    assert r.json()["approval_required"] is True
+    # turn off again (clean up)
+    client.put("/api/settings", json={"approval_required": False})
+
+
+def test_api_approve_unknown_run_returns_404():
+    client = TestClient(fastapi_app)
+    response = client.post("/api/agent/runs/does-not-exist/approve")
+    assert response.status_code == 404
+
+
+def test_api_deny_unknown_run_returns_404():
+    client = TestClient(fastapi_app)
+    response = client.post("/api/agent/runs/does-not-exist/deny")
+    assert response.status_code == 404

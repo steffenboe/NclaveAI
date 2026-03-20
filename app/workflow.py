@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from app.executor import CommandExecutor
-from app.models import RunContext
+from app.models import Command, RunContext  # Command needed for approval_gate type annotation
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 
@@ -28,18 +29,24 @@ class AgentWorkflow:
         planner: Planner,
         policy: PolicyEvaluator,
         executor: CommandExecutor,
+        approval_gate: Callable[[Command], bool] | None = None,
     ) -> None:
         self._planner = planner
         self._policy = policy
         self._executor = executor
+        self._approval_gate = approval_gate
 
     def run(
         self,
         prompt: str,
-        run_id: str,
+        run_id: str | None = None,
         max_iterations: int = 10,
+        ctx: RunContext | None = None,
     ) -> RunContext:
-        ctx = RunContext(run_id=run_id, prompt=prompt)
+        if ctx is None:
+            if run_id is None:
+                raise ValueError("run_id required when ctx is not provided")
+            ctx = RunContext(run_id=run_id, prompt=prompt)
         self._log("run_started", ctx, extra={"prompt": prompt})
 
         for iteration in range(max_iterations):
@@ -53,12 +60,14 @@ class AgentWorkflow:
 
             if plan_output.status in ("done", "failed"):
                 ctx.status = plan_output.status
+                if plan_output.status == "failed":
+                    ctx.final_message = plan_output.summary
                 break
 
             command = plan_output.command  # guaranteed non-None when status == "action"
 
             # VALIDATE (OPA step)
-            allowed, reason = self._policy.evaluate(command)
+            allowed, reason, skill_name = self._policy.evaluate(command)
             if not allowed:
                 self._log("policy_denied", ctx, extra={
                     "argv": command.argv,
@@ -67,8 +76,15 @@ class AgentWorkflow:
                 ctx.status = "policy_denied"
                 break
 
+            # HUMAN APPROVAL (optional gate)
+            if self._approval_gate is not None and not self._approval_gate(command):
+                self._log("approval_denied", ctx, extra={"argv": command.argv})
+                ctx.status = "policy_denied"
+                break
+
             # EXECUTE (subprocess step)
             result = self._executor.run(command)
+            result.skill_name = skill_name
             ctx.history.append(result)
             self._log("action_executed", ctx, extra={
                 "argv": command.argv,
@@ -83,10 +99,13 @@ class AgentWorkflow:
                 "max_iterations": max_iterations
             })
 
-        try:
-            ctx.final_message = self._planner.summarize(ctx)
-        except Exception as exc:
-            self._log("summarize_failed", ctx, extra={"error": str(exc)})
+        if ctx.status == "policy_denied":
+            ctx.final_message = "Run stopped: a command was not approved."
+        elif ctx.final_message is None:
+            try:
+                ctx.final_message = self._planner.summarize(ctx)
+            except Exception as exc:
+                self._log("summarize_failed", ctx, extra={"error": str(exc)})
 
         self._log("run_finished", ctx, extra={"final_status": ctx.status})
         return ctx

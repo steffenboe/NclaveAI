@@ -6,36 +6,21 @@ from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.models import ActionResult, PlannerOutput, RunContext
+from app.skills import SkillRepository
 
-_SYSTEM_PROMPT = """\
-You are an autonomous operations agent for the notesllm application.
-
-You are given a problem description and a history of actions already taken.
-Your job is to decide the SINGLE NEXT action needed to make progress toward
-solving the problem, or to declare that the goal is achieved (done) or
-unresolvable (failed).
-
-You have access to standard Kubernetes CLI tools available in the execution
-environment (e.g. kubectl, helm). When status is "action", produce the exact
-command to run as an argv list — no shell expansion, no pipes, no redirection.
-
+_RULES = """\
 Rules:
 - Always read before writing. Observe the current state before making changes.
 - Only take the minimum action required. Do not over-correct.
 - If the last action's output shows the problem is resolved, return status=done.
-- If you have tried 3+ actions without progress, return status=failed.
+- Produce the next action as a single argv list using one of the tools above.
+  No shell expansion, no pipes, no redirection.
 - Your rationale field is for the audit log only — be concise.
 
 Your response must be a JSON object with these fields:
   - status: "action" | "done" | "failed"
   - summary: one sentence explaining your decision
   - command: {{ argv: [...], rationale: "..." }}  — required when status is "action", omit otherwise
-
-When the prompt starts with "[WEBHOOK EVENT]", you are responding to an
-automated external event. Analyze the JSON payload to determine if any
-Kubernetes resources require corrective action. If no action is needed
-(e.g. the event is informational), return status=done immediately with
-a brief explanation in the summary field.
 """
 
 _HUMAN_PROMPT = """\
@@ -48,11 +33,11 @@ What is the next action? If the goal is achieved, return status=done.
 """
 
 _SUMMARIZE_SYSTEM_PROMPT = """\
-You are an operations assistant reporting on a completed autonomous Kubernetes task.
+You are a developer assistant reporting on a completed autonomous task.
 
 Write a concise user-facing summary (2–4 sentences).
 Cover: what was investigated, what actions were taken, and the final outcome.
-Use plain language — do not include raw kubectl output or JSON.
+Use plain language — do not include raw command output or JSON.
 """
 
 _SUMMARIZE_HUMAN_PROMPT = """\
@@ -81,7 +66,8 @@ def _format_history(history: list[ActionResult]) -> str:
 
 
 class Planner:
-    def __init__(self) -> None:
+    def __init__(self, skill_repo: SkillRepository) -> None:
+        self._skill_repo = skill_repo
         llm = ChatOpenAI(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
@@ -90,7 +76,7 @@ class Planner:
         )
         structured_llm = llm.with_structured_output(PlannerOutput)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", _SYSTEM_PROMPT),
+            ("system", "{system_prompt}"),
             ("human", _HUMAN_PROMPT),
         ])
         self._chain = prompt | structured_llm
@@ -101,8 +87,32 @@ class Planner:
         ])
         self._summarize_chain = summarize_prompt | llm | StrOutputParser()
 
+    def _build_system_prompt(self) -> str:
+        enabled = [s for s in self._skill_repo.list() if s.enabled]
+        if not enabled:
+            return (
+                "You are an autonomous developer companion agent.\n\n"
+                "No specific tools are pre-configured. Use whatever CLI tools you judge appropriate "
+                "(e.g. kubectl, helm, curl). Tool calls are gated by a policy at runtime — "
+                "if a command is denied you will see an error in the action history; try an alternative.\n\n"
+                + _RULES
+            )
+        tools_section = "\n\n".join(
+            f"[{s.name}]\n{s.description}" for s in enabled
+        )
+        return (
+            "You are an autonomous developer companion agent.\n\n"
+            f"The following skills are pre-configured and available:\n\n{tools_section}\n\n"
+            "You may also use any standard CLI tool that is appropriate for the task "
+            "(e.g. ls, grep, curl, cat, find) — skills are helpers, not an exhaustive list. "
+            "Tool calls are gated by a policy at runtime — "
+            "if a command is denied you will see an error in the action history; try a different approach or tool.\n\n"
+            + _RULES
+        )
+
     def next_action(self, ctx: RunContext) -> PlannerOutput:
         return self._chain.invoke({
+            "system_prompt": self._build_system_prompt(),
             "prompt": ctx.prompt,
             "history_str": _format_history(ctx.history),
         })
