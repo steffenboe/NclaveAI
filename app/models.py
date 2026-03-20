@@ -27,6 +27,7 @@ class ActionResult(BaseModel):
     command: Command
     allowed: bool
     policy_reason: str | None = None
+    skill_name: str | None = None   # None = global policy fallback or denied
     stdout: str | None = None
     stderr: str | None = None
     exit_code: int | None = None
@@ -45,7 +46,8 @@ class RunContext(BaseModel):
     run_id: str
     prompt: str
     history: list[ActionResult] = []
-    status: Literal["running", "done", "failed", "policy_denied"] = "running"
+    status: Literal["running", "done", "failed", "policy_denied", "waiting_approval"] = "running"
     final_message: str | None = None
+    pending_command: dict[str, Any] | None = None
     source: Literal["manual", "webhook"] = "manual"
     event_id: str | None = None

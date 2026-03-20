@@ -10,10 +10,13 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1"
 
-    agent_roles: str = "INFRA_OPERATOR"
     max_iterations: int = 10
 
+    command_timeout_seconds: int = 30
+
     policy_path: Path
+
+    skills_file: Path = Path("./skills.json")
 
 
 settings = Settings()

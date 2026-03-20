@@ -1,11 +1,13 @@
+from datetime import datetime, timezone
 from pathlib import Path
-import pytest
 
+import pytest
 from pydantic import ValidationError
 
 from app.config import Settings, settings
 from app.models import Command
 from app.policy import PolicyEvaluator
+from app.skills import Skill
 
 _REGO_PATH = Path(__file__).parent.parent / "policies" / "executor.rego"
 
@@ -17,8 +19,6 @@ def patch_policy_path(monkeypatch):
 
 def test_settings_requires_policy_path(monkeypatch):
     monkeypatch.delenv("POLICY_PATH", raising=False)
-    # _env_file=None prevents pydantic-settings from loading a .env file
-    # that could supply POLICY_PATH and mask the missing-var error
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
 
@@ -27,129 +27,122 @@ def _cmd(argv: list[str]) -> Command:
     return Command(argv=argv, rationale="test")
 
 
-@pytest.fixture
-def observer():
-    return PolicyEvaluator(roles=["INFRA_OBSERVER"])
+def test_deny_all_policy_denies_any_command():
+    # The default executor.rego has `default allow = false`
+    evaluator = PolicyEvaluator()
+    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    assert allowed is False
+    assert reason is not None
 
 
-@pytest.fixture
-def operator():
-    return PolicyEvaluator(roles=["INFRA_OPERATOR"])
+def test_deny_all_policy_denies_multiple_commands():
+    evaluator = PolicyEvaluator()
+    for argv in [["gh", "pr", "list"], ["terraform", "plan"], ["rm", "-rf", "/"]]:
+        allowed, _ = evaluator.evaluate(_cmd(argv))
+        assert allowed is False
 
 
-# --- INFRA_OBSERVER ---
+def _allow_all_policy(tmp_path: Path) -> Path:
+    p = tmp_path / "allow_all.rego"
+    p.write_text("package ops.agent\ndefault allow = true\n")
+    return p
 
-def test_observer_can_kubectl_get(observer):
-    allowed, reason = observer.evaluate(_cmd(["kubectl", "get", "pods", "-n", "notesllm"]))
+
+def _skill(policy: str | None) -> Skill:
+    return Skill(
+        id="test-id",
+        name="test",
+        description="test skill",
+        policy=policy,
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+def test_evaluator_returns_none_reason_when_allowed(tmp_path):
+    # Write an allow-all policy and supply a skill that also allows all
+    evaluator = PolicyEvaluator(
+        policy_path=_allow_all_policy(tmp_path),
+        skills=[_skill("allow { true }")],
+    )
+    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is True
     assert reason is None
 
 
-def test_observer_can_kubectl_logs(observer):
-    allowed, reason = observer.evaluate(_cmd(["kubectl", "logs", "backend-xyz", "-n", "notesllm"]))
+def test_policy_evaluator_raises_on_missing_file():
+    with pytest.raises(FileNotFoundError):
+        PolicyEvaluator(policy_path=Path("/nonexistent/path/policy.rego"))
+
+
+# ── skill-level policy tests ───────────────────────────────────────────────────
+
+def test_skill_policy_allows_matching_command(tmp_path):
+    evaluator = PolicyEvaluator(
+        policy_path=_allow_all_policy(tmp_path),
+        skills=[_skill('allow {\n  input.argv[0] == "kubectl"\n}')],
+    )
+    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is True
+    assert reason is None
 
 
-def test_observer_can_kubectl_describe(observer):
-    allowed, reason = observer.evaluate(_cmd(["kubectl", "describe", "pod", "backend-xyz"]))
-    assert allowed is True
-
-
-def test_observer_can_helm_list(observer):
-    allowed, reason = observer.evaluate(_cmd(["helm", "list", "-n", "notesllm"]))
-    assert allowed is True
-
-
-def test_observer_cannot_kubectl_rollout(observer):
-    allowed, reason = observer.evaluate(_cmd(["kubectl", "rollout", "restart", "deployment/backend"]))
+def test_skill_policy_denies_non_matching_command(tmp_path):
+    evaluator = PolicyEvaluator(
+        policy_path=_allow_all_policy(tmp_path),
+        skills=[_skill('allow {\n  input.argv[0] == "kubectl"\n}')],
+    )
+    allowed, reason = evaluator.evaluate(_cmd(["gh", "pr", "list"]))
     assert allowed is False
-    assert reason is not None
+    assert reason == "No skill policy permits this command"
 
 
-def test_observer_cannot_kubectl_scale(observer):
-    allowed, reason = observer.evaluate(_cmd(["kubectl", "scale", "deployment/backend", "--replicas=3"]))
-    assert allowed is False
-
-
-def test_observer_cannot_helm_upgrade(observer):
-    allowed, reason = observer.evaluate(_cmd(["helm", "upgrade", "notesllm", "./chart"]))
-    assert allowed is False
-
-
-# --- INFRA_OPERATOR ---
-
-def test_operator_can_kubectl_rollout(operator):
-    allowed, reason = operator.evaluate(_cmd(["kubectl", "rollout", "restart", "deployment/backend"]))
-    assert allowed is True
-
-
-def test_operator_can_kubectl_scale(operator):
-    allowed, reason = operator.evaluate(_cmd(["kubectl", "scale", "deployment/backend", "--replicas=3"]))
-    assert allowed is True
-
-
-def test_operator_can_helm_upgrade(operator):
-    allowed, reason = operator.evaluate(_cmd(["helm", "upgrade", "notesllm", "./chart"]))
-    assert allowed is True
-
-
-# --- edge cases ---
-
-def test_no_roles_denies_everything():
-    evaluator = PolicyEvaluator(roles=[])
+def test_no_skill_policy_denies_all(tmp_path):
+    evaluator = PolicyEvaluator(
+        policy_path=_allow_all_policy(tmp_path),
+        skills=[_skill(None)],
+    )
     allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is False
+    assert reason == "No skill policy permits this command"
 
 
-def test_unknown_command_denied():
-    evaluator = PolicyEvaluator(roles=["INFRA_OPERATOR"])
-    allowed, reason = evaluator.evaluate(_cmd(["rm", "-rf", "/"]))
+def test_no_skills_denies_all(tmp_path):
+    evaluator = PolicyEvaluator(
+        policy_path=_allow_all_policy(tmp_path),
+        skills=[],
+    )
+    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is False
+    assert reason == "No skill policy permits this command"
 
 
-def test_observer_can_helm_status(observer):
-    allowed, reason = observer.evaluate(_cmd(["helm", "status", "notesllm", "-n", "notesllm"]))
+def test_multi_skill_or_semantics(tmp_path):
+    evaluator = PolicyEvaluator(
+        policy_path=_allow_all_policy(tmp_path),
+        skills=[
+            _skill('allow {\n  input.argv[0] == "kubectl"\n}'),
+            _skill('allow {\n  input.argv[0] == "gh"\n}'),
+        ],
+    )
+    allowed, reason = evaluator.evaluate(_cmd(["gh", "pr", "list"]))
     assert allowed is True
+    assert reason is None
 
 
-def test_partial_argv_denied(observer):
-    # ["kubectl"] alone (no subcommand) must be denied — no prefix of length 1 is in the allowlist
-    allowed, reason = observer.evaluate(_cmd(["kubectl"]))
+def test_global_deny_takes_priority():
+    # autouse fixture points at executor.rego which has `default allow = false`
+    evaluator = PolicyEvaluator(
+        skills=[_skill('allow {\n  input.argv[0] == "kubectl"\n}')],
+    )
+    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is False
+    assert "denied by policy" in reason
 
 
-# --- INFRA_OBSERVER secrets restriction ---
-
-def test_observer_cannot_get_secrets(observer):
-    allowed, reason = observer.evaluate(_cmd(["kubectl", "get", "secrets", "-n", "notesllm"]))
+def test_policy_path_defaults_to_settings():
+    # autouse fixture sets settings.policy_path to a valid path;
+    # calling with no policy_path must not raise
+    evaluator = PolicyEvaluator(skills=[_skill("allow { true }")])
+    allowed, _ = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    # executor.rego denies everything — just verifying no exception raised
     assert allowed is False
-    assert reason is not None
-
-
-def test_observer_cannot_get_secret_by_name(observer):
-    allowed, reason = observer.evaluate(_cmd(["kubectl", "get", "secret", "agent-secret", "-n", "notesllm"]))
-    assert allowed is False
-
-
-def test_observer_cannot_describe_secret(observer):
-    allowed, reason = observer.evaluate(_cmd(["kubectl", "describe", "secret", "agent-secret"]))
-    assert allowed is False
-
-
-def test_operator_can_get_secrets(operator):
-    # INFRA_OPERATOR retains secret access
-    allowed, reason = operator.evaluate(_cmd(["kubectl", "get", "secrets", "-n", "notesllm"]))
-    assert allowed is True
-
-
-def test_multi_role_union_allows_write(observer):
-    # A user with both roles should get operator privileges
-    evaluator = PolicyEvaluator(roles=["INFRA_OBSERVER", "INFRA_OPERATOR"])
-    allowed, reason = evaluator.evaluate(_cmd(["kubectl", "rollout", "restart", "deployment/backend"]))
-    assert allowed is True
-
-
-def test_policy_evaluator_raises_on_missing_file(monkeypatch):
-    monkeypatch.setattr(settings, "policy_path", Path("/nonexistent/path/policy.rego"))
-    with pytest.raises(FileNotFoundError):
-        PolicyEvaluator(roles=["INFRA_OBSERVER"])

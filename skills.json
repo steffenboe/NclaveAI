@@ -1,0 +1,10 @@
+[
+  {
+    "id": "9ad4c13b-bd04-4b66-8682-44caa1eb8f52",
+    "name": "kubectl",
+    "description": "use it to discover, inspect and edit kubernetes resources\nUSE ONLY THE DEFAULT NAMESPACE IN THE KUBERNETES CLUSTER!",
+    "enabled": true,
+    "policy": "allow {\n  input.argv[0] == \"kubectl\"\n}",
+    "created_at": "2026-03-19T13:22:10.466119Z"
+  }
+]
