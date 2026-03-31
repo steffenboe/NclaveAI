@@ -38,6 +38,25 @@ def workflow():
     )
 
 
+@pytest.fixture
+def mock_planner():
+    m = MagicMock()
+    m.summarize.return_value = "Test summary."
+    return m
+
+
+@pytest.fixture
+def mock_executor():
+    return MagicMock()
+
+
+@pytest.fixture
+def mock_policy():
+    m = MagicMock()
+    m.evaluate.return_value = (True, None, None)
+    return m
+
+
 def test_workflow_runs_single_action_then_done(workflow):
     workflow._planner.next_action.side_effect = [
         _planner_output(status="action"),
@@ -328,3 +347,29 @@ def test_api_deny_unknown_run_returns_404():
     client = TestClient(fastapi_app)
     response = client.post("/api/agent/runs/does-not-exist/deny")
     assert response.status_code == 404
+
+
+def test_workflow_passes_skill_overrides_to_policy(mock_planner, mock_executor, mock_policy):
+    """workflow must pass ctx.skill_overrides into policy.evaluate() on each call."""
+    mock_planner.next_action.side_effect = [
+        PlannerOutput(status="action", command=Command(argv=["kubectl", "get", "pods"], rationale="r"), summary="s"),
+        PlannerOutput(status="done", summary="all done"),
+    ]
+    mock_policy.evaluate.return_value = (True, None, "kubectl-skill")
+    mock_executor.run.return_value = ActionResult(
+        command=Command(argv=["kubectl", "get", "pods"], rationale="r"),
+        allowed=True, stdout="", stderr="", exit_code=0,
+    )
+
+    ctx = RunContext(
+        run_id="r1",
+        prompt="test",
+        skill_overrides={"skill-abc": False},
+    )
+    wf = AgentWorkflow(planner=mock_planner, policy=mock_policy, executor=mock_executor)
+    wf.run(prompt="test", ctx=ctx)
+
+    mock_policy.evaluate.assert_called_once_with(
+        Command(argv=["kubectl", "get", "pods"], rationale="r"),
+        skill_overrides={"skill-abc": False},
+    )

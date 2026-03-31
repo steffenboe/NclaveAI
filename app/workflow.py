@@ -67,7 +67,7 @@ class AgentWorkflow:
             command = plan_output.command  # guaranteed non-None when status == "action"
 
             # VALIDATE (OPA step)
-            allowed, reason, skill_name = self._policy.evaluate(command)
+            allowed, reason, skill_name = self._policy.evaluate(command, skill_overrides=ctx.skill_overrides)
             if not allowed:
                 self._log("policy_denied", ctx, extra={
                     "argv": command.argv,
