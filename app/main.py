@@ -286,6 +286,64 @@ def delete_skill(skill_id: str, request: Request) -> None:
         raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} not found")
 
 
+# ── Per-run skill overrides ───────────────────────────────────────────────────
+
+class RunSkillResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    enabled: bool
+    effective_enabled: bool
+    policy: str | None
+    created_at: Any
+
+
+class RunSkillPatchRequest(BaseModel):
+    enabled: bool
+
+
+def _run_skill_response(skill, overrides: dict[str, bool]) -> RunSkillResponse:
+    return RunSkillResponse(
+        id=skill.id,
+        name=skill.name,
+        description=skill.description,
+        enabled=skill.enabled,
+        effective_enabled=overrides.get(skill.id, skill.enabled),
+        policy=skill.policy,
+        created_at=skill.created_at,
+    )
+
+
+@app.get("/api/agent/runs/{run_id}/skills")
+def get_run_skills(run_id: str, request: Request) -> list[RunSkillResponse]:
+    with _runs_lock:
+        ctx = _runs.get(run_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+    skills = request.app.state.skill_repo.list()
+    return [_run_skill_response(s, ctx.skill_overrides) for s in skills]
+
+
+@app.patch("/api/agent/runs/{run_id}/skills/{skill_id}")
+def patch_run_skill(
+    run_id: str,
+    skill_id: str,
+    body: RunSkillPatchRequest,
+    request: Request,
+) -> RunSkillResponse:
+    with _runs_lock:
+        ctx = _runs.get(run_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+    try:
+        skill = request.app.state.skill_repo.get(skill_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} not found")
+    with _runs_lock:
+        ctx.skill_overrides[skill_id] = body.enabled
+    return _run_skill_response(skill, ctx.skill_overrides)
+
+
 # ── Misc ──────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
