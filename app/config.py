@@ -18,5 +18,7 @@ class Settings(BaseSettings):
 
     skills_file: Path = Path("./skills.json")
 
+    runs_file: Path = Path("./runs.json")
+
 
 settings = Settings()
