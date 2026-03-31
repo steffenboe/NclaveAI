@@ -141,18 +141,21 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
     run_id = str(uuid.uuid4())
 
     seeded_history: list = []
+    seeded_overrides: dict[str, bool] = {}
     parent_run_id: str | None = None
     if request.context_run_id is not None:
         with _runs_lock:
             parent_ctx = _runs.get(request.context_run_id)
         if parent_ctx is not None:
             seeded_history = copy.deepcopy(parent_ctx.history)
+            seeded_overrides = dict(parent_ctx.skill_overrides)
             parent_run_id = request.context_run_id
 
     ctx = RunContext(
         run_id=run_id,
         prompt=request.prompt,
         history=seeded_history,
+        skill_overrides=seeded_overrides,
         parent_run_id=parent_run_id,
     )
     skill_repo = req.app.state.skill_repo

@@ -109,3 +109,36 @@ def test_start_run_without_context_run_id_works_normally(client):
     time.sleep(0.05)
     ctx = main_module._runs[new_run_id]
     assert ctx.parent_run_id is None
+
+
+def test_new_run_inherits_parent_skill_overrides(client):
+    """New run started from a parent with skill_overrides copies those overrides."""
+    parent = RunContext(
+        run_id="parent-sk",
+        prompt="first",
+        status="done",
+        skill_overrides={"skill-abc": False, "skill-xyz": True},
+    )
+    main_module._runs["parent-sk"] = parent
+
+    with patch("app.main._build_workflow", return_value=_fake_workflow()):
+        resp = client.post("/api/agent/run", json={
+            "prompt": "follow up",
+            "context_run_id": "parent-sk",
+        })
+
+    new_run_id = resp.json()["run_id"]
+    time.sleep(0.1)
+    ctx = main_module._runs[new_run_id]
+    assert ctx.skill_overrides == {"skill-abc": False, "skill-xyz": True}
+
+
+def test_new_run_without_parent_starts_with_empty_skill_overrides(client):
+    """A fresh run (no context_run_id) starts with no skill_overrides."""
+    with patch("app.main._build_workflow", return_value=_fake_workflow()):
+        resp = client.post("/api/agent/run", json={"prompt": "fresh"})
+
+    new_run_id = resp.json()["run_id"]
+    time.sleep(0.05)
+    ctx = main_module._runs[new_run_id]
+    assert ctx.skill_overrides == {}
