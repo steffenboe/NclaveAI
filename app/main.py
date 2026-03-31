@@ -90,7 +90,7 @@ def _build_workflow(
     run_id: str | None = None,
     ctx: RunContext | None = None,
 ) -> AgentWorkflow:
-    enabled_skills = [s for s in skill_repo.list() if s.enabled]
+    all_skills = skill_repo.list()
     gate = None
     if run_id is not None and ctx is not None:
         with _settings_lock:
@@ -99,7 +99,7 @@ def _build_workflow(
             gate = _make_approval_gate(run_id, ctx)
     return AgentWorkflow(
         planner=Planner(skill_repo),
-        policy=PolicyEvaluator(skills=enabled_skills),
+        policy=PolicyEvaluator(skills=all_skills),
         executor=CommandExecutor(),
         approval_gate=gate,
     )

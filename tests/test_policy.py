@@ -161,3 +161,77 @@ def test_policy_path_defaults_to_settings():
     allowed, _, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
     assert allowed is True
     assert skill_name == "test"
+
+
+def _skill_with_id(skill_id: str, policy: str | None, enabled: bool = True) -> Skill:
+    return Skill(
+        id=skill_id,
+        name=skill_id,
+        description="test skill",
+        enabled=enabled,
+        policy=policy,
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+# ── skill_overrides tests ──────────────────────────────────────────────────────
+
+def test_override_enables_globally_disabled_skill():
+    """A globally-disabled skill can be enabled for a specific run via overrides."""
+    skill = _skill_with_id("s1", 'allow { input.argv[0] == "kubectl" }', enabled=False)
+    evaluator = PolicyEvaluator(skills=[skill])
+    # Without override: globally disabled → must not allow (falls through to global deny-all)
+    allowed, _, _ = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    assert allowed is False
+
+    # With override enabling it: must now allow
+    allowed, _, skill_name = evaluator.evaluate(
+        _cmd(["kubectl", "get", "pods"]),
+        skill_overrides={"s1": True},
+    )
+    assert allowed is True
+    assert skill_name == "s1"
+
+
+def test_override_disables_globally_enabled_skill(tmp_path):
+    """A globally-enabled skill can be disabled for a specific run via overrides."""
+    skill = _skill_with_id("s1", 'allow { input.argv[0] == "kubectl" }', enabled=True)
+    evaluator = PolicyEvaluator(
+        policy_path=_allow_all_policy(tmp_path),
+        skills=[skill],
+    )
+    # Without override: globally enabled → allows
+    allowed, _, skill_name = evaluator.evaluate(_cmd(["kubectl", "get", "pods"]))
+    assert allowed is True
+    assert skill_name == "s1"
+
+    # With override disabling it: must fall through to global (allow-all in this test)
+    allowed, _, skill_name = evaluator.evaluate(
+        _cmd(["kubectl", "get", "pods"]),
+        skill_overrides={"s1": False},
+    )
+    assert allowed is True   # falls through to global allow-all
+    assert skill_name is None  # global fallback, not the skill
+
+
+def test_unknown_skill_id_in_overrides_is_ignored():
+    """Unknown skill IDs in the overrides map must not cause errors."""
+    evaluator = PolicyEvaluator()  # no skills
+    allowed, _, _ = evaluator.evaluate(
+        _cmd(["ls"]),
+        skill_overrides={"nonexistent-id": True},
+    )
+    # executor.rego allows ls, so this should still pass via global
+    assert allowed is True
+
+
+def test_no_overrides_falls_back_to_global_enabled_flag():
+    """When skill_overrides is None, global enabled flag is used (existing behaviour)."""
+    skill = _skill_with_id("s1", 'allow { input.argv[0] == "kubectl" }', enabled=True)
+    evaluator = PolicyEvaluator(skills=[skill])
+    allowed, _, skill_name = evaluator.evaluate(
+        _cmd(["kubectl", "get", "pods"]),
+        skill_overrides=None,
+    )
+    assert allowed is True
+    assert skill_name == "s1"
