@@ -1191,21 +1191,32 @@
     }
     try {
       const res = await fetch('/api/agent/runs/' + runId + '/skills');
-      if (!res.ok) return;
-      convSkillsData = await res.json();
-      renderConvSkills(runId);
-    } catch {}
+      if (res.ok) {
+        convSkillsData = await res.json();
+      } else {
+        // Run not found server-side (e.g. after restart) — still show the bar
+        // using the global skill list so the user knows the feature exists.
+        const fallback = await fetch('/api/skills');
+        convSkillsData = fallback.ok ? (await fallback.json()).map(s => ({ ...s, effective_enabled: s.enabled })) : [];
+      }
+    } catch {
+      convSkillsData = [];
+    }
+    renderConvSkills(runId);
   }
 
   function renderConvSkills(runId) {
     const bar = document.getElementById('conv-skills-bar');
     const container = document.getElementById('conv-skills-toggles');
     container.innerHTML = '';
+    bar.classList.remove('hidden');
     if (convSkillsData.length === 0) {
-      bar.classList.add('hidden');
+      const hint = document.createElement('span');
+      hint.style.cssText = 'font-size:11px;color:#9aa0a6;font-style:italic;';
+      hint.textContent = 'No skills yet — add some in \u2699 Settings.';
+      container.appendChild(hint);
       return;
     }
-    bar.classList.remove('hidden');
     for (const skill of convSkillsData) {
       const btn = document.createElement('button');
       btn.className = 'toggle-enabled btn-sm' + (skill.effective_enabled ? ' on' : '');
