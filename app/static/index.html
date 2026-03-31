@@ -8,8 +8,8 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: #0d1117;
-      color: #e6edf3;
+      background: #ffffff;
+      color: #1f2328;
       font-family: ui-monospace, 'Cascadia Code', 'Fira Code', Consolas, monospace;
       font-size: 14px;
       line-height: 1.5;
@@ -22,19 +22,19 @@
     .sidebar {
       width: 260px;
       flex-shrink: 0;
-      background: #161b22;
-      border-right: 1px solid #21262d;
+      background: #f6f8fa;
+      border-right: 1px solid #d0d7de;
       display: flex;
       flex-direction: column;
       overflow: hidden;
     }
     .sidebar-top {
       padding: 12px 10px 8px;
-      border-bottom: 1px solid #21262d;
+      border-bottom: 1px solid #d0d7de;
     }
     .btn-new-chat {
       width: 100%;
-      background: #238636;
+      background: #1f883d;
       color: #fff;
       border: none;
       border-radius: 6px;
@@ -45,7 +45,7 @@
       cursor: pointer;
       text-align: left;
     }
-    .btn-new-chat:hover { background: #2ea043; }
+    .btn-new-chat:hover { background: #2da44e; }
 
     .sidebar-list {
       flex: 1;
@@ -61,36 +61,36 @@
       cursor: pointer;
       transition: background 0.1s;
     }
-    .sidebar-item:hover { background: #21262d; }
-    .sidebar-item.active { background: #1f4a6e; }
+    .sidebar-item:hover { background: #eaeef2; }
+    .sidebar-item.active { background: #ddf4ff; }
     .sidebar-prompt {
       font-size: 12px;
-      color: #e6edf3;
+      color: #1f2328;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       margin-bottom: 3px;
     }
-    .sidebar-item.active .sidebar-prompt { color: #79c0ff; }
+    .sidebar-item.active .sidebar-prompt { color: #0969da; }
     .sidebar-status { font-size: 11px; }
 
     .sidebar-bottom {
       padding: 10px 12px;
-      border-top: 1px solid #21262d;
+      border-top: 1px solid #d0d7de;
       display: flex;
       justify-content: flex-end;
     }
     .btn-gear {
       background: none;
       border: none;
-      color: #6e7681;
+      color: #848d97;
       font-size: 18px;
       cursor: pointer;
       padding: 2px 4px;
       line-height: 1;
       transition: color 0.15s;
     }
-    .btn-gear:hover { color: #e6edf3; }
+    .btn-gear:hover { color: #1f2328; }
 
     /* ── Main area ───────────────────────────────────── */
     .main {
@@ -98,7 +98,7 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      background: #0d1117;
+      background: #ffffff;
     }
 
     .conversation-feed {
@@ -112,7 +112,7 @@
 
     .empty-hint {
       margin: auto;
-      color: #484f58;
+      color: #9aa0a6;
       font-size: 13px;
       font-style: italic;
       text-align: center;
@@ -124,8 +124,8 @@
       justify-content: flex-end;
     }
     .user-bubble {
-      background: #1f4a6e;
-      color: #c9d1d9;
+      background: #ddf4ff;
+      color: #1f2328;
       font-size: 13px;
       padding: 10px 14px;
       border-radius: 12px 12px 2px 12px;
@@ -141,7 +141,7 @@
     }
     .agent-label {
       font-size: 10px;
-      color: #6e7681;
+      color: #848d97;
       font-weight: 600;
       letter-spacing: 0.4px;
       text-transform: uppercase;
@@ -150,8 +150,8 @@
 
     /* ── Command cards ───────────────────────────────── */
     .cmd-card {
-      background: #161b22;
-      border: 1px solid #21262d;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
       border-radius: 2px 8px 8px 8px;
       overflow: hidden;
     }
@@ -160,51 +160,51 @@
       align-items: center;
       gap: 8px;
       padding: 7px 12px;
-      background: #0d1117;
+      background: #eaeef2;
     }
     .cmd-argv {
       flex: 1;
-      color: #79c0ff;
+      color: #0969da;
       font-size: 12px;
       word-break: break-all;
     }
-    .cmd-argv::before { content: "$ "; color: #484f58; }
+    .cmd-argv::before { content: "$ "; color: #9aa0a6; }
 
-    .badge-ok   { font-size: 11px; color: #3fb950; flex-shrink: 0; }
-    .badge-err  { font-size: 11px; color: #f85149; flex-shrink: 0; }
-    .badge-denied { font-size: 11px; color: #d29922; flex-shrink: 0; }
+    .badge-ok   { font-size: 11px; color: #1a7f37; flex-shrink: 0; }
+    .badge-err  { font-size: 11px; color: #cf222e; flex-shrink: 0; }
+    .badge-denied { font-size: 11px; color: #9a6700; flex-shrink: 0; }
 
     .skill-tag {
       font-size: 10px;
-      background: #1a2d3f;
-      color: #58a6ff;
-      border: 1px solid #1f4a6e;
+      background: #ddf4ff;
+      color: #0550ae;
+      border: 1px solid #b6e3ff;
       border-radius: 4px;
       padding: 1px 6px;
       flex-shrink: 0;
     }
     .skill-tag.fallback {
-      background: #21262d;
-      color: #6e7681;
-      border-color: #30363d;
+      background: #eaeef2;
+      color: #848d97;
+      border-color: #c8cdd3;
     }
 
     .cmd-rationale {
       font-size: 11px;
-      color: #6e7681;
+      color: #848d97;
       font-style: italic;
       padding: 4px 12px 6px;
-      border-top: 1px solid #21262d;
-      background: #0d1117;
+      border-top: 1px solid #d0d7de;
+      background: #f6f8fa;
     }
     .cmd-output {
-      border-top: 1px solid #21262d;
-      background: #0d1117;
+      border-top: 1px solid #d0d7de;
+      background: #f6f8fa;
     }
     .cmd-output-toggle {
       padding: 5px 12px;
       font-size: 10px;
-      color: #484f58;
+      color: #9aa0a6;
       cursor: pointer;
       user-select: none;
       list-style: none;
@@ -215,18 +215,18 @@
     .cmd-output pre {
       padding: 0 12px 8px;
       font-size: 11px;
-      color: #c9d1d9;
+      color: #454c54;
       white-space: pre-wrap;
       word-break: break-all;
       max-height: 180px;
       overflow-y: auto;
     }
-    .cmd-output pre.stderr { color: #f85149; }
+    .cmd-output pre.stderr { color: #cf222e; }
 
     /* ── Thinking indicator ──────────────────────────── */
     .thinking {
       font-size: 12px;
-      color: #58a6ff;
+      color: #0550ae;
       display: flex;
       align-items: center;
       gap: 7px;
@@ -235,8 +235,8 @@
 
     /* ── Approval card ───────────────────────────────── */
     .approval-card {
-      background: #1a1030;
-      border: 1px solid #a371f7;
+      background: #fbefff;
+      border: 1px solid #8250df;
       border-radius: 2px 8px 8px 8px;
       overflow: hidden;
     }
@@ -245,9 +245,9 @@
       align-items: center;
       gap: 7px;
       padding: 8px 12px;
-      border-bottom: 1px solid #a371f730;
+      border-bottom: 1px solid #d8b9ff;
       font-size: 11px;
-      color: #a371f7;
+      color: #8250df;
       font-weight: 700;
       letter-spacing: 0.4px;
       text-transform: uppercase;
@@ -255,41 +255,41 @@
     .approval-dot {
       width: 7px;
       height: 7px;
-      background: #a371f7;
+      background: #8250df;
       border-radius: 50%;
       flex-shrink: 0;
     }
     .approval-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
     .approval-cmd {
       font-size: 12px;
-      color: #79c0ff;
+      color: #0969da;
       word-break: break-all;
     }
-    .approval-cmd::before { content: "$ "; color: #484f58; }
-    .approval-rationale { font-size: 11px; color: #6e7681; font-style: italic; }
+    .approval-cmd::before { content: "$ "; color: #9aa0a6; }
+    .approval-rationale { font-size: 11px; color: #848d97; font-style: italic; }
     .approval-actions { display: flex; gap: 8px; margin-top: 4px; }
     .btn-approve {
-      background: #1a3a2a; border: 1px solid #2ea043; color: #3fb950;
+      background: #dafbe1; border: 1px solid #2da44e; color: #1a7f37;
       border-radius: 5px; padding: 5px 14px; font-size: 12px;
       font-family: inherit; cursor: pointer;
     }
-    .btn-approve:hover:not(:disabled) { background: #1f4a35; }
+    .btn-approve:hover:not(:disabled) { background: #c6efcb; }
     .btn-deny {
-      background: #3d1f1f; border: 1px solid #8b2a2a; color: #f85149;
+      background: #ffebe9; border: 1px solid #cf222e; color: #cf222e;
       border-radius: 5px; padding: 5px 14px; font-size: 12px;
       font-family: inherit; cursor: pointer;
     }
-    .btn-deny:hover:not(:disabled) { background: #4d2525; }
+    .btn-deny:hover:not(:disabled) { background: #ffd7d3; }
     .btn-approve:disabled, .btn-deny:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* ── AI summary block (done) ─────────────────────── */
     .summary-block {
-      background: #161b22;
-      border: 1px solid #21262d;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
       border-radius: 2px 8px 8px 8px;
       padding: 10px 14px;
       font-size: 13px;
-      color: #c9d1d9;
+      color: #454c54;
       line-height: 1.6;
       margin-top: 2px;
     }
@@ -301,18 +301,18 @@
       font-size: 12px;
       margin-top: 4px;
     }
-    .status-banner.s-failed        { background: #3d1f1f; border: 1px solid #8b2a2a; color: #f85149; }
-    .status-banner.s-policy_denied { background: #3d2f1f; border: 1px solid #6e4f1f; color: #d29922; }
+    .status-banner.s-failed        { background: #ffebe9; border: 1px solid #cf222e; color: #cf222e; }
+    .status-banner.s-policy_denied { background: #fff8c5; border: 1px solid #d4a72c; color: #9a6700; }
 
     /* ── Input area ──────────────────────────────────── */
     .input-area {
       padding: 12px 32px 16px;
-      border-top: 1px solid #21262d;
-      background: #0d1117;
+      border-top: 1px solid #d0d7de;
+      background: #ffffff;
     }
     .input-wrapper {
-      background: #161b22;
-      border: 1px solid #30363d;
+      background: #ffffff;
+      border: 1px solid #c8cdd3;
       border-radius: 8px;
       display: flex;
       align-items: center;
@@ -320,22 +320,22 @@
       padding: 9px 12px;
       transition: border-color 0.15s, opacity 0.15s;
     }
-    .input-wrapper:focus-within { border-color: #58a6ff; }
+    .input-wrapper:focus-within { border-color: #0969da; }
     .input-wrapper.disabled { opacity: 0.5; }
     #prompt-input {
       flex: 1;
       background: none;
       border: none;
       outline: none;
-      color: #e6edf3;
+      color: #1f2328;
       font-size: 13px;
       font-family: inherit;
       resize: none;
       height: 22px;
     }
-    #prompt-input::placeholder { color: #484f58; }
+    #prompt-input::placeholder { color: #9aa0a6; }
     #run-btn {
-      background: #238636;
+      background: #1f883d;
       color: #fff;
       border: none;
       border-radius: 5px;
@@ -345,15 +345,15 @@
       cursor: pointer;
       flex-shrink: 0;
     }
-    #run-btn:hover:not(:disabled) { background: #2ea043; }
-    #run-btn:disabled { background: #21262d; color: #6e7681; cursor: not-allowed; }
+    #run-btn:hover:not(:disabled) { background: #2da44e; }
+    #run-btn:disabled { background: #eaeef2; color: #848d97; cursor: not-allowed; }
 
     /* ── Status pill colours ─────────────────────────── */
-    .s-running       { color: #58a6ff; }
-    .s-waiting_approval { color: #a371f7; }
-    .s-done          { color: #3fb950; }
-    .s-failed        { color: #f85149; }
-    .s-policy_denied { color: #d29922; }
+    .s-running       { color: #0550ae; }
+    .s-waiting_approval { color: #8250df; }
+    .s-done          { color: #1a7f37; }
+    .s-failed        { color: #cf222e; }
+    .s-policy_denied { color: #9a6700; }
 
     /* ── Spinner ─────────────────────────────────────── */
     .spin {
@@ -370,7 +370,7 @@
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(1,4,9,.75);
+      background: rgba(31,35,40,.4);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -378,8 +378,8 @@
     }
     .modal-overlay.hidden { display: none; }
     .modal {
-      background: #161b22;
-      border: 1px solid #30363d;
+      background: #ffffff;
+      border: 1px solid #d0d7de;
       border-radius: 10px;
       width: 600px;
       max-width: 95vw;
@@ -393,20 +393,20 @@
       align-items: center;
       justify-content: space-between;
       padding: 14px 18px;
-      border-bottom: 1px solid #21262d;
+      border-bottom: 1px solid #d0d7de;
     }
-    .modal-header h2 { font-size: 15px; color: #e6edf3; }
+    .modal-header h2 { font-size: 15px; color: #1f2328; }
     .btn-close {
-      background: none; border: none; color: #6e7681;
+      background: none; border: none; color: #848d97;
       font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 6px;
     }
-    .btn-close:hover { color: #e6edf3; }
+    .btn-close:hover { color: #1f2328; }
     .modal-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
 
     /* Settings section inside modal */
     .settings-section {
-      background: #0d1117;
-      border: 1px solid #21262d;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
       border-radius: 6px;
       padding: 12px 14px;
       margin-bottom: 20px;
@@ -416,13 +416,13 @@
     }
     .settings-section label {
       display: flex; align-items: center; gap: 8px;
-      cursor: pointer; color: #8b949e; font-size: 12px;
+      cursor: pointer; color: #636c76; font-size: 12px;
     }
 
     /* Skill cards */
     .skill-card {
-      background: #0d1117;
-      border: 1px solid #21262d;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
       border-radius: 6px;
       padding: 11px 13px;
       margin-bottom: 8px;
@@ -431,51 +431,51 @@
       gap: 10px;
     }
     .skill-info { flex: 1; min-width: 0; }
-    .skill-name { color: #79c0ff; font-weight: 600; font-size: 13px; margin-bottom: 3px; }
-    .skill-desc { color: #8b949e; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .skill-name { color: #0969da; font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+    .skill-desc { color: #636c76; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .skill-actions { display: flex; gap: 5px; flex-shrink: 0; }
     .policy-badge { font-size: 10px; border-radius: 4px; padding: 1px 6px; font-weight: 500; flex-shrink: 0; margin-top: 5px; display: inline-block; }
-    .policy-badge.has-policy { background: #1a3a2a; color: #3fb950; }
-    .policy-badge.no-policy  { background: #21262d; color: #6e7681; }
+    .policy-badge.has-policy { background: #dafbe1; color: #1a7f37; }
+    .policy-badge.no-policy  { background: #eaeef2; color: #848d97; }
 
     button.btn-sm { padding: 4px 9px; font-size: 11px; font-weight: 500; font-family: inherit; border-radius: 5px; cursor: pointer; border: none; }
-    button.btn-secondary { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; }
-    button.btn-secondary:hover { background: #2d333b; }
-    button.btn-danger { background: #6e2323; color: #f85149; }
-    button.btn-danger:hover { background: #8b2a2a; }
-    button.toggle-enabled { cursor: pointer; font-size: 11px; color: #8b949e; padding: 4px 9px; background: #21262d; border: 1px solid #30363d; border-radius: 5px; font-family: inherit; }
-    button.toggle-enabled.on { color: #3fb950; border-color: #2ea043; background: #1a3a2a; }
+    button.btn-secondary { background: #f6f8fa; border: 1px solid #d0d7de; color: #454c54; }
+    button.btn-secondary:hover { background: #eaeef2; }
+    button.btn-danger { background: #ffebe9; color: #cf222e; border: 1px solid #cf222e; }
+    button.btn-danger:hover { background: #ffd7d3; }
+    button.toggle-enabled { cursor: pointer; font-size: 11px; color: #636c76; padding: 4px 9px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 5px; font-family: inherit; }
+    button.toggle-enabled.on { color: #1a7f37; border-color: #2da44e; background: #dafbe1; }
 
     .skill-form {
-      background: #0d1117;
-      border: 1px solid #58a6ff;
+      background: #f6f8fa;
+      border: 1px solid #0969da;
       border-radius: 8px;
       padding: 14px;
       margin-bottom: 14px;
     }
-    .skill-form label { display: block; color: #8b949e; font-size: 11px; margin-bottom: 3px; margin-top: 10px; }
+    .skill-form label { display: block; color: #636c76; font-size: 11px; margin-bottom: 3px; margin-top: 10px; }
     .skill-form label:first-of-type { margin-top: 0; }
     .skill-form input[type="text"],
     .skill-form textarea {
       width: 100%;
-      background: #161b22;
-      border: 1px solid #30363d;
+      background: #ffffff;
+      border: 1px solid #d0d7de;
       border-radius: 5px;
-      color: #e6edf3;
+      color: #1f2328;
       padding: 7px 9px;
       font-family: inherit;
       font-size: 12px;
     }
     .skill-form input[type="text"]:focus,
-    .skill-form textarea:focus { outline: none; border-color: #58a6ff; }
+    .skill-form textarea:focus { outline: none; border-color: #0969da; }
     .skill-form textarea { min-height: 100px; resize: vertical; }
     .form-actions { display: flex; gap: 7px; margin-top: 12px; }
 
     .modal-add-btn {
       width: 100%;
       background: none;
-      border: 1px dashed #30363d;
-      color: #6e7681;
+      border: 1px dashed #c8cdd3;
+      color: #848d97;
       border-radius: 6px;
       padding: 8px;
       font-size: 12px;
@@ -483,14 +483,14 @@
       cursor: pointer;
       margin-top: 4px;
     }
-    .modal-add-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+    .modal-add-btn:hover { border-color: #0969da; color: #0969da; }
 
-    .no-items-msg { color: #6e7681; font-size: 12px; font-style: italic; text-align: center; padding: 20px; }
+    .no-items-msg { color: #848d97; font-size: 12px; font-style: italic; text-align: center; padding: 20px; }
 
     /* ── Per-conversation skills bar ─────────────────────── */
     .conv-skills-bar {
-      border-top: 1px solid #21262d;
-      background: #0d1117;
+      border-top: 1px solid #d0d7de;
+      background: #f6f8fa;
       padding: 6px 32px;
       display: flex;
       align-items: center;
@@ -500,7 +500,7 @@
     }
     .conv-skills-label {
       font-size: 10px;
-      color: #484f58;
+      color: #9aa0a6;
       text-transform: uppercase;
       letter-spacing: 0.4px;
       flex-shrink: 0;
