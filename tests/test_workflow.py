@@ -373,3 +373,39 @@ def test_workflow_passes_skill_overrides_to_policy(mock_planner, mock_executor, 
         Command(argv=["kubectl", "get", "pods"], rationale="r"),
         skill_overrides={"skill-abc": False},
     )
+
+
+def test_globally_enabled_skill_blocked_by_conversation_override(mock_planner, mock_executor):
+    """An override disabling a globally-enabled skill blocks commands that skill would allow."""
+    from app.policy import PolicyEvaluator
+    from app.skills import Skill
+    from datetime import datetime, timezone
+
+    skill = Skill(
+        id="k8s",
+        name="kubectl",
+        description="k8s",
+        enabled=True,  # globally enabled
+        policy='allow { input.argv[0] == "kubectl" }',
+        created_at=datetime.now(timezone.utc),
+    )
+    policy = PolicyEvaluator(skills=[skill])
+
+    mock_planner.next_action.return_value = PlannerOutput(
+        status="action",
+        command=Command(argv=["kubectl", "get", "pods"], rationale="check pods"),
+        summary="running kubectl",
+    )
+
+    ctx = RunContext(
+        run_id="r-override",
+        prompt="check pods",
+        skill_overrides={"k8s": False},  # override: disable kubectl skill for this run
+    )
+
+    wf = AgentWorkflow(planner=mock_planner, policy=policy, executor=mock_executor)
+    result = wf.run(prompt="check pods", ctx=ctx)
+
+    # executor.rego has deny-all, so with skill disabled, command must be blocked
+    assert result.status == "policy_denied"
+    mock_executor.run.assert_not_called()
