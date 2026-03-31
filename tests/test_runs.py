@@ -210,3 +210,31 @@ def test_skill_override_persisted(client_with_repo):
     assert res.status_code == 200
     loaded = repo.get("test-override")
     assert loaded.skill_overrides[skill.id] is False
+
+
+def test_runs_survive_restart(tmp_path):
+    """After saving a completed run and re-loading, GET /api/agent/runs shows it."""
+    from app.runs import RunRepository
+    from app.skills import SkillRepository
+    from app.models import RunContext
+
+    runs_path = tmp_path / "runs.json"
+
+    # First "session": save a completed run
+    repo1 = RunRepository(runs_path)
+    ctx = RunContext(run_id="r-persist", prompt="survives?", status="done", final_message="yes")
+    repo1.save(ctx)
+
+    # Second "session": simulate restart by creating a new repo + populating _runs
+    repo2 = RunRepository(runs_path)
+    app.state.run_repo = repo2
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    with _runs_lock:
+        _runs.clear()
+        _runs.update(repo2.all_as_dict())
+
+    client = TestClient(app)
+    res = client.get("/api/agent/runs")
+    assert res.status_code == 200
+    ids = [r["run_id"] for r in res.json()]
+    assert "r-persist" in ids
