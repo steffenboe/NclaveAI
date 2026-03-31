@@ -486,6 +486,27 @@
     .modal-add-btn:hover { border-color: #58a6ff; color: #58a6ff; }
 
     .no-items-msg { color: #6e7681; font-size: 12px; font-style: italic; text-align: center; padding: 20px; }
+
+    /* ── Per-conversation skills bar ─────────────────────── */
+    .conv-skills-bar {
+      border-top: 1px solid #21262d;
+      background: #0d1117;
+      padding: 6px 32px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-height: 36px;
+    }
+    .conv-skills-label {
+      font-size: 10px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .conv-skills-bar.hidden { display: none; }
   </style>
 </head>
 <body>
@@ -505,6 +526,11 @@
 <div class="main">
   <div class="conversation-feed" id="conversation-feed">
     <div class="empty-hint">Start a new chat or select one from the sidebar.</div>
+  </div>
+  <!-- ── Per-conversation skills bar ────────────────────── -->
+  <div class="conv-skills-bar hidden" id="conv-skills-bar">
+    <span class="conv-skills-label">This conversation:</span>
+    <div id="conv-skills-toggles" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
   </div>
   <div class="input-area">
     <div class="input-wrapper" id="input-wrapper">
@@ -604,7 +630,11 @@
         if (r.status === 'running' || r.status === 'waiting_approval') pollRun(r.run_id);
       }
       const roots = getRoots();
-      if (roots.length > 0) selectedRootId = roots[roots.length - 1];
+      if (roots.length > 0) {
+        selectedRootId = roots[roots.length - 1];
+        const chain = getChain(selectedRootId);
+        loadConvSkills(chain[chain.length - 1]);
+      }
     } catch {}
     render();
   }
@@ -659,6 +689,10 @@
   function selectConversation(rootId) {
     selectedRootId = rootId;
     render();
+    // Load per-conversation skills for the tail run
+    const chain = getChain(rootId);
+    const tailRunId = chain[chain.length - 1];
+    loadConvSkills(tailRunId);
   }
 
   // ── Main area ──────────────────────────────────────────
@@ -922,6 +956,7 @@
       if (!context_run_id) selectedRootId = data.run_id;
       render();
       pollRun(data.run_id);
+      loadConvSkills(data.run_id);
     } catch (e) {
       setInputState(false, 'Continue this chat\u2026');
       alert('Failed to start run: ' + e.message);
@@ -931,6 +966,7 @@
   // ── New chat ───────────────────────────────────────────
   function newChat() {
     selectedRootId = null;
+    loadConvSkills(null);
     render();
     document.getElementById('prompt-input').focus();
   }
@@ -1143,6 +1179,53 @@
     const res = await fetch('/api/skills/' + id, { method: 'DELETE' });
     if (!res.ok) { alert('Failed to delete skill.'); return; }
     await loadSkills();
+  }
+
+  // ── Per-conversation skill overrides ───────────────────
+  let convSkillsData = [];   // [{id, name, enabled, effective_enabled, ...}]
+
+  async function loadConvSkills(runId) {
+    if (!runId) {
+      document.getElementById('conv-skills-bar').classList.add('hidden');
+      return;
+    }
+    try {
+      const res = await fetch('/api/agent/runs/' + runId + '/skills');
+      if (!res.ok) return;
+      convSkillsData = await res.json();
+      renderConvSkills(runId);
+    } catch {}
+  }
+
+  function renderConvSkills(runId) {
+    const bar = document.getElementById('conv-skills-bar');
+    const container = document.getElementById('conv-skills-toggles');
+    container.innerHTML = '';
+    if (convSkillsData.length === 0) {
+      bar.classList.add('hidden');
+      return;
+    }
+    bar.classList.remove('hidden');
+    for (const skill of convSkillsData) {
+      const btn = document.createElement('button');
+      btn.className = 'toggle-enabled btn-sm' + (skill.effective_enabled ? ' on' : '');
+      btn.textContent = skill.name;
+      btn.title = skill.description;
+      btn.onclick = () => toggleConvSkill(runId, skill);
+      container.appendChild(btn);
+    }
+  }
+
+  async function toggleConvSkill(runId, skill) {
+    try {
+      const res = await fetch('/api/agent/runs/' + runId + '/skills/' + skill.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !skill.effective_enabled }),
+      });
+      if (!res.ok) return;
+      await loadConvSkills(runId);
+    } catch {}
   }
 
   // ── Utilities ──────────────────────────────────────────
