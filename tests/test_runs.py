@@ -143,3 +143,13 @@ def test_terminal_runs_survive_restart(tmp_path):
     ctx = repo.get("r1")
     assert ctx.status == "done"
     assert ctx.final_message == "great"
+
+
+def test_all_as_dict_returns_copies(repo):
+    ctx = _make_run()
+    repo.save(ctx)
+    d = repo.all_as_dict()
+    assert "r1" in d
+    # Mutating the returned object should not affect the repo
+    d["r1"].status = "failed"
+    assert repo.get("r1").status == "done"

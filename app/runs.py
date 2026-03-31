@@ -47,7 +47,7 @@ class RunRepository:
         self._path.write_text(json.dumps(rows, indent=2))
 
     def save(self, ctx: RunContext) -> None:
-        """Persist a single run (upsert). Call this under _runs_lock in main.py."""
+        """Persist a single run (upsert). Thread-safe."""
         with self._lock:
             self._runs[ctx.run_id] = ctx
             self._save_all()
@@ -63,6 +63,6 @@ class RunRepository:
             return self._runs[run_id].model_copy()
 
     def all_as_dict(self) -> dict[str, RunContext]:
-        """Return a shallow copy of the internal dict for populating _runs at startup."""
+        """Return a copy of all runs (by run_id) for populating _runs at startup."""
         with self._lock:
-            return dict(self._runs)
+            return {run_id: ctx.model_copy() for run_id, ctx in self._runs.items()}
