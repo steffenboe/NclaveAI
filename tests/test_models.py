@@ -54,3 +54,20 @@ def test_run_context_parent_run_id_can_be_set():
     assert ctx.parent_run_id == "parent-123"
 
 
+def test_run_context_has_empty_skill_overrides_by_default():
+    ctx = RunContext(run_id="r1", prompt="hello")
+    assert ctx.skill_overrides == {}
+
+
+def test_run_context_skill_overrides_stores_bool_by_skill_id():
+    ctx = RunContext(run_id="r1", prompt="hello", skill_overrides={"skill-1": False, "skill-2": True})
+    assert ctx.skill_overrides["skill-1"] is False
+    assert ctx.skill_overrides["skill-2"] is True
+
+
+def test_run_context_skill_overrides_serializes_to_json():
+    ctx = RunContext(run_id="r1", prompt="hello", skill_overrides={"abc": True})
+    data = ctx.model_dump()
+    assert data["skill_overrides"] == {"abc": True}
+
+

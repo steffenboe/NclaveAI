@@ -41,3 +41,4 @@ class RunContext(BaseModel):
     final_message: str | None = None
     pending_command: dict[str, Any] | None = None
     parent_run_id: str | None = None
+    skill_overrides: dict[str, bool] = {}
