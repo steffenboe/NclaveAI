@@ -634,6 +634,8 @@
         selectedRootId = roots[roots.length - 1];
         const chain = getChain(selectedRootId);
         loadConvSkills(chain[chain.length - 1]);
+      } else {
+        loadConvSkillsForNewChat();
       }
     } catch {}
     render();
@@ -955,6 +957,7 @@
 
       if (!context_run_id) selectedRootId = data.run_id;
       render();
+      await applyPendingOverrides(data.run_id);
       pollRun(data.run_id);
       loadConvSkills(data.run_id);
     } catch (e) {
@@ -966,7 +969,7 @@
   // ── New chat ───────────────────────────────────────────
   function newChat() {
     selectedRootId = null;
-    loadConvSkills(null);
+    loadConvSkillsForNewChat();
     render();
     document.getElementById('prompt-input').focus();
   }
@@ -1183,6 +1186,7 @@
 
   // ── Per-conversation skill overrides ───────────────────
   let convSkillsData = [];   // [{id, name, enabled, effective_enabled, ...}]
+  let pendingOverrides = {}; // skill_id → bool, applied on first submit of a new chat
 
   async function loadConvSkills(runId) {
     if (!runId) {
@@ -1203,6 +1207,17 @@
       convSkillsData = [];
     }
     renderConvSkills(runId);
+  }
+
+  async function loadConvSkillsForNewChat() {
+    pendingOverrides = {};
+    try {
+      const res = await fetch('/api/skills');
+      convSkillsData = res.ok
+        ? (await res.json()).map(s => ({ ...s, effective_enabled: s.enabled }))
+        : [];
+    } catch { convSkillsData = []; }
+    renderConvSkills(null);  // null = pending mode
   }
 
   function renderConvSkills(runId) {
@@ -1228,6 +1243,14 @@
   }
 
   async function toggleConvSkill(runId, skill) {
+    if (!runId) {
+      // New chat — no run yet, accumulate in pendingOverrides
+      const next = !skill.effective_enabled;
+      pendingOverrides[skill.id] = next;
+      skill.effective_enabled = next;
+      renderConvSkills(null);
+      return;
+    }
     try {
       const res = await fetch('/api/agent/runs/' + runId + '/skills/' + skill.id, {
         method: 'PATCH',
@@ -1237,6 +1260,19 @@
       if (!res.ok) return;
       await loadConvSkills(runId);
     } catch {}
+  }
+
+  async function applyPendingOverrides(runId) {
+    const entries = Object.entries(pendingOverrides);
+    if (entries.length === 0) return;
+    await Promise.all(entries.map(([skillId, enabled]) =>
+      fetch('/api/agent/runs/' + runId + '/skills/' + skillId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+    ));
+    pendingOverrides = {};
   }
 
   // ── Utilities ──────────────────────────────────────────
