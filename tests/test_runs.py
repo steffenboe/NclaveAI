@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -153,3 +155,58 @@ def test_all_as_dict_returns_copies(repo):
     # Mutating the returned object should not affect the repo
     d["r1"].status = "failed"
     assert repo.get("r1").status == "done"
+
+
+# ── Integration: persistence wired into the app ───────────────────────────────
+
+from fastapi.testclient import TestClient
+from app.main import app, _runs, _runs_lock
+
+
+@pytest.fixture
+def client_with_repo(tmp_path):
+    from app.runs import RunRepository
+    from app.skills import SkillRepository
+    repo = RunRepository(tmp_path / "runs.json")
+    app.state.run_repo = repo
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    with _runs_lock:
+        _runs.clear()
+        _runs.update(repo.all_as_dict())
+    return TestClient(app), repo, tmp_path
+
+
+def test_run_persisted_on_creation(client_with_repo):
+    client, repo, tmp_path = client_with_repo
+    with patch("app.main.AgentWorkflow") as MockWF:
+        mock_wf = MagicMock()
+        MockWF.return_value = mock_wf
+        def fake_run(prompt, max_iterations, ctx):
+            ctx.status = "done"
+            ctx.final_message = "finished"
+            return ctx
+        mock_wf.run.side_effect = fake_run
+        res = client.post("/api/agent/run", json={"prompt": "hello"})
+        assert res.status_code == 202
+        run_id = res.json()["run_id"]
+        time.sleep(0.3)
+        loaded = repo.get(run_id)
+        assert loaded.status == "done"
+
+
+def test_skill_override_persisted(client_with_repo):
+    client, repo, tmp_path = client_with_repo
+    from app.skills import SkillRepository
+    skill_repo = SkillRepository(tmp_path / "skills.json")
+    skill = skill_repo.create(name="ls", description="list")
+    app.state.skill_repo = skill_repo
+
+    ctx = RunContext(run_id="test-override", prompt="p", status="done")
+    with _runs_lock:
+        _runs["test-override"] = ctx
+    repo.save(ctx)
+
+    res = client.patch(f"/api/agent/runs/test-override/skills/{skill.id}", json={"enabled": False})
+    assert res.status_code == 200
+    loaded = repo.get("test-override")
+    assert loaded.skill_overrides[skill.id] is False

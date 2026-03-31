@@ -19,6 +19,7 @@ from app.executor import CommandExecutor
 from app.models import Command, RunContext
 from app.planner import Planner
 from app.policy import PolicyEvaluator
+from app.runs import RunRepository
 from app.skills import SkillRepository
 from app.workflow import AgentWorkflow
 
@@ -79,6 +80,10 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.skill_repo = SkillRepository(settings.skills_file)
+    run_repo = RunRepository(settings.runs_file)
+    app.state.run_repo = run_repo
+    with _runs_lock:
+        _runs.update(run_repo.all_as_dict())
     yield
 
 
@@ -151,9 +156,11 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
         parent_run_id=parent_run_id,
     )
     skill_repo = req.app.state.skill_repo
+    run_repo = req.app.state.run_repo
 
     with _runs_lock:
         _runs[run_id] = ctx
+    run_repo.save(ctx)
 
     def _execute() -> None:
         workflow = _build_workflow(skill_repo, run_id=run_id, ctx=ctx)
@@ -164,6 +171,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
         )
         with _runs_lock:
             _runs[run_id] = result
+        run_repo.save(result)
 
     thread = threading.Thread(target=_execute, daemon=True)
     thread.start()
@@ -341,6 +349,7 @@ def patch_run_skill(
         raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} not found")
     with _runs_lock:
         ctx.skill_overrides[skill_id] = body.enabled
+    request.app.state.run_repo.save(ctx)
     return _run_skill_response(skill, ctx.skill_overrides)
 
 
