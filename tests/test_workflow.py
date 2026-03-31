@@ -308,13 +308,14 @@ def test_workflow_run_accepts_prebuilt_ctx():
     assert ctx.status == "done"
 
 
-def test_workflow_policy_denied_sets_hardcoded_final_message(workflow):
-    """policy_denied → final_message is hardcoded, summarize not called."""
+def test_workflow_policy_denied_sets_final_message_with_command(workflow):
+    """policy_denied → final_message includes the denied command, summarize not called."""
     workflow._planner.next_action.return_value = _planner_output(status="action")
     workflow._policy.evaluate.return_value = (False, "Not permitted", None)
     ctx = workflow.run("fix", "run-denied-msg")
     assert ctx.status == "policy_denied"
-    assert ctx.final_message == "Run stopped: a command was not approved."
+    assert "kubectl get pods -n notesllm" in ctx.final_message
+    assert ctx.final_message.startswith("Run stopped:")
     workflow._planner.summarize.assert_not_called()
 
 

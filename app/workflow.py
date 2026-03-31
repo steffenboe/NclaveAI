@@ -74,12 +74,14 @@ class AgentWorkflow:
                     "reason": reason,
                 })
                 ctx.status = "policy_denied"
+                ctx.final_message = f"Run stopped: '{ ' '.join(command.argv) }' was not approved by policy."
                 break
 
             # HUMAN APPROVAL (optional gate)
             if self._approval_gate is not None and not self._approval_gate(command):
                 self._log("approval_denied", ctx, extra={"argv": command.argv})
                 ctx.status = "policy_denied"
+                ctx.final_message = f"Run stopped: '{ ' '.join(command.argv) }' was not approved."
                 break
 
             # EXECUTE (subprocess step)
@@ -100,7 +102,7 @@ class AgentWorkflow:
             })
 
         if ctx.status == "policy_denied":
-            ctx.final_message = "Run stopped: a command was not approved."
+            pass  # final_message already set at point of denial
         elif ctx.final_message is None:
             try:
                 ctx.final_message = self._planner.summarize(ctx)
