@@ -136,6 +136,12 @@ class SkillPatchRequest(BaseModel):
     policy: str | None = None
 
 
+class GeneratePolicyRequest(BaseModel):
+    skill_name: str
+    skill_description: str
+    description: str
+
+
 @app.post("/api/agent/run", status_code=202, response_model=RunResponse)
 def start_run(request: RunRequest, req: Request) -> RunResponse:
     run_id = str(uuid.uuid4())
@@ -250,6 +256,18 @@ def deny_command(run_id: str) -> dict:
 @app.get("/api/skills")
 def list_skills(request: Request) -> list:
     return [s.model_dump(mode="json") for s in request.app.state.skill_repo.list()]
+
+
+@app.post("/api/skills/generate-policy")
+def generate_policy_endpoint(body: GeneratePolicyRequest, request: Request) -> dict:
+    skill_repo = getattr(request.app.state, "skill_repo", None)
+    planner = Planner(skill_repo)
+    policy = planner.generate_policy(
+        skill_name=body.skill_name,
+        skill_description=body.skill_description,
+        plain_description=body.description,
+    )
+    return {"policy": policy}
 
 
 @app.get("/api/skills/{skill_id}")

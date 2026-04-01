@@ -233,3 +233,37 @@ def test_generate_policy_passes_all_context_to_chain():
     assert call_kwargs["skill_name"] == "gh"
     assert call_kwargs["skill_description"] == "GitHub CLI"
     assert call_kwargs["plain_description"] == "allow all gh commands"
+
+
+def test_api_generate_policy_returns_policy_string():
+    from unittest.mock import patch, MagicMock
+    from fastapi.testclient import TestClient
+    from app.main import app as fastapi_app
+
+    mock_planner = MagicMock()
+    mock_planner.generate_policy.return_value = 'allow { input.argv[0] == "kubectl" }'
+
+    with patch("app.main.Planner", return_value=mock_planner):
+        client = TestClient(fastapi_app)
+        res = client.post("/api/skills/generate-policy", json={
+            "skill_name": "kubectl",
+            "skill_description": "Kubernetes CLI",
+            "description": "allow only kubectl commands",
+        })
+
+    assert res.status_code == 200
+    body = res.json()
+    assert "policy" in body
+    assert body["policy"] == 'allow { input.argv[0] == "kubectl" }'
+
+
+def test_api_generate_policy_missing_field_returns_422():
+    from fastapi.testclient import TestClient
+    from app.main import app as fastapi_app
+
+    client = TestClient(fastapi_app)
+    res = client.post("/api/skills/generate-policy", json={
+        "skill_name": "kubectl",
+        # missing skill_description and description
+    })
+    assert res.status_code == 422
