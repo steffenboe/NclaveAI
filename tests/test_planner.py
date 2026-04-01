@@ -1,10 +1,13 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
+
+from fastapi.testclient import TestClient
 
 from app.models import ActionResult, Command, PlannerOutput, RunContext
 from app.planner import Planner, _format_history
 from app.skills import Skill, SkillRepository
+from app.main import app as fastapi_app
 
 
 def _make_command(argv=None):
@@ -235,11 +238,8 @@ def test_generate_policy_passes_all_context_to_chain():
     assert call_kwargs["plain_description"] == "allow all gh commands"
 
 
-def test_api_generate_policy_returns_policy_string():
-    from unittest.mock import patch, MagicMock
-    from fastapi.testclient import TestClient
-    from app.main import app as fastapi_app
-
+def test_api_generate_policy_returns_policy_string(tmp_path):
+    fastapi_app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
     mock_planner = MagicMock()
     mock_planner.generate_policy.return_value = 'allow { input.argv[0] == "kubectl" }'
 
@@ -258,9 +258,6 @@ def test_api_generate_policy_returns_policy_string():
 
 
 def test_api_generate_policy_missing_field_returns_422():
-    from fastapi.testclient import TestClient
-    from app.main import app as fastapi_app
-
     client = TestClient(fastapi_app)
     res = client.post("/api/skills/generate-policy", json={
         "skill_name": "kubectl",

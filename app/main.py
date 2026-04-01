@@ -260,13 +260,15 @@ def list_skills(request: Request) -> list:
 
 @app.post("/api/skills/generate-policy")
 def generate_policy_endpoint(body: GeneratePolicyRequest, request: Request) -> dict:
-    skill_repo = getattr(request.app.state, "skill_repo", None)
-    planner = Planner(skill_repo)
-    policy = planner.generate_policy(
-        skill_name=body.skill_name,
-        skill_description=body.skill_description,
-        plain_description=body.description,
-    )
+    planner = Planner(request.app.state.skill_repo)
+    try:
+        policy = planner.generate_policy(
+            skill_name=body.skill_name,
+            skill_description=body.skill_description,
+            plain_description=body.description,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"LLM error: {exc}") from exc
     return {"policy": policy}
 
 
