@@ -471,6 +471,32 @@
     .skill-form textarea { min-height: 100px; resize: vertical; }
     .form-actions { display: flex; gap: 7px; margin-top: 12px; }
 
+    .policy-popup {
+      margin-top: 8px;
+      padding: 10px 12px;
+      background: #f1f3f4;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .policy-popup label {
+      font-size: 12px;
+      font-weight: 500;
+      color: #3c4043;
+    }
+    .policy-popup textarea {
+      width: 100%;
+      resize: vertical;
+      font-size: 12px;
+      padding: 6px 8px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      background: #fff;
+      box-sizing: border-box;
+    }
+
     .modal-add-btn {
       width: 100%;
       background: none;
@@ -1124,9 +1150,16 @@
     formActions.appendChild(save);
     formActions.appendChild(cancel);
 
+    const genBtn = document.createElement('button');
+    genBtn.type = 'button';
+    genBtn.className = 'btn-sm btn-secondary';
+    genBtn.textContent = 'Generate with AI';
+    genBtn.onclick = () => showPolicyPopup(form);
+
     form.appendChild(nameLabel);   form.appendChild(nameInput);
     form.appendChild(descLabel);   form.appendChild(descInput);
     form.appendChild(policyLabel); form.appendChild(policyInput);
+    form.appendChild(genBtn);
     form.appendChild(formActions);
 
     container.innerHTML = '';
@@ -1135,6 +1168,80 @@
 
   function hideSkillForm() {
     document.getElementById('skill-form-container').innerHTML = '';
+  }
+
+  function showPolicyPopup(form) {
+    const existing = form.querySelector('.policy-popup');
+    if (existing) existing.remove();
+
+    const popup = document.createElement('div');
+    popup.className = 'policy-popup';
+
+    const label = document.createElement('label');
+    label.textContent = 'Describe the policy in plain English';
+
+    const textarea = document.createElement('textarea');
+    textarea.id = 'sf-policy-desc';
+    textarea.placeholder = 'e.g. only allow kubectl get and kubectl describe commands';
+    textarea.rows = 3;
+
+    const actions = document.createElement('div');
+    actions.className = 'form-actions';
+
+    const genBtn = document.createElement('button');
+    genBtn.type = 'button';
+    genBtn.className = 'btn-sm btn-secondary';
+    genBtn.textContent = 'Generate';
+    genBtn.onclick = () => generatePolicy(popup, genBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn-sm btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => popup.remove();
+
+    actions.appendChild(genBtn);
+    actions.appendChild(cancelBtn);
+    popup.appendChild(label);
+    popup.appendChild(textarea);
+    popup.appendChild(actions);
+    form.appendChild(popup);
+    textarea.focus();
+  }
+
+  async function generatePolicy(popup, genBtn) {
+    const plainDesc = document.getElementById('sf-policy-desc').value.trim();
+    if (!plainDesc) { alert('Please describe the policy first.'); return; }
+
+    const skillName = document.getElementById('sf-name').value.trim();
+    const skillDesc = document.getElementById('sf-desc').value.trim();
+
+    genBtn.disabled = true;
+    genBtn.textContent = 'Generating\u2026';
+
+    try {
+      const res = await fetch('/api/skills/generate-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          skill_name: skillName,
+          skill_description: skillDesc,
+          description: plainDesc,
+        }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+
+      const policyTextarea = document.getElementById('sf-policy');
+      const existing = policyTextarea.value.trim();
+      policyTextarea.value = existing ? existing + '\n\n' + data.policy : data.policy;
+
+      popup.remove();
+    } catch (e) {
+      alert('Failed to generate policy: ' + e.message);
+      genBtn.disabled = false;
+      genBtn.textContent = 'Generate';
+    }
   }
 
   async function createSkill() {
