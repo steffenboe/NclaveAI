@@ -51,6 +51,34 @@ Actions taken:
 Write the user-facing summary.
 """
 
+_POLICY_SYSTEM_PROMPT = """\
+You are an OPA (Open Policy Agent) Rego expert.
+
+Your task: generate a valid Rego policy body for the given skill.
+
+STRICT RULES:
+- Output ONLY bare Rego rule bodies. No `package` line. No markdown fences. No explanation.
+- The input object has exactly one field: `input.argv` — a list of strings (the command + arguments).
+- Use `allow {{ ... }}` rules. Multiple `allow` rules are OR'd together.
+- Keep the policy minimal — only express exactly what the user described.
+
+EXAMPLE (for a skill named "kubectl" that allows only kubectl commands):
+allow {{ input.argv[0] == "kubectl" }}
+
+EXAMPLE (for a skill that allows kubectl get and kubectl describe only):
+allow {{ input.argv[0] == "kubectl"; input.argv[1] == "get" }}
+allow {{ input.argv[0] == "kubectl"; input.argv[1] == "describe" }}
+"""
+
+_POLICY_HUMAN_PROMPT = """\
+Skill name: {skill_name}
+Skill description: {skill_description}
+
+Policy requirement (plain English): {plain_description}
+
+Generate the Rego rule bodies now.
+"""
+
 
 def _format_history(history: list[ActionResult]) -> str:
     if not history:
@@ -87,6 +115,12 @@ class Planner:
         ])
         self._summarize_chain = summarize_prompt | llm | StrOutputParser()
 
+        policy_prompt = ChatPromptTemplate.from_messages([
+            ("system", _POLICY_SYSTEM_PROMPT),
+            ("human", _POLICY_HUMAN_PROMPT),
+        ])
+        self._policy_chain = policy_prompt | llm | StrOutputParser()
+
     def _build_system_prompt(self) -> str:
         enabled = [s for s in self._skill_repo.list() if s.enabled]
         if not enabled:
@@ -122,4 +156,11 @@ class Planner:
             "prompt": ctx.prompt,
             "status": ctx.status,
             "history_str": _format_history(ctx.history),
+        })
+
+    def generate_policy(self, skill_name: str, skill_description: str, plain_description: str) -> str:
+        return self._policy_chain.invoke({
+            "skill_name": skill_name,
+            "skill_description": skill_description,
+            "plain_description": plain_description,
         })

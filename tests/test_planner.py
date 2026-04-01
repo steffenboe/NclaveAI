@@ -203,3 +203,33 @@ def test_next_action_passes_system_prompt_to_chain(tmp_path, ctx_empty):
     call_kwargs = mock_chain.invoke.call_args[0][0]
     assert "system_prompt" in call_kwargs
     assert "[kubectl]" in call_kwargs["system_prompt"]
+
+
+def test_generate_policy_returns_string(tmp_path):
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value = 'allow { input.argv[0] == "kubectl" }'
+    planner = Planner.__new__(Planner)
+    planner._policy_chain = mock_chain
+    result = planner.generate_policy(
+        skill_name="kubectl",
+        skill_description="Kubernetes CLI",
+        plain_description="only allow kubectl commands",
+    )
+    assert isinstance(result, str)
+    assert result == 'allow { input.argv[0] == "kubectl" }'
+
+
+def test_generate_policy_passes_all_context_to_chain(tmp_path):
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value = "allow { true }"
+    planner = Planner.__new__(Planner)
+    planner._policy_chain = mock_chain
+    planner.generate_policy(
+        skill_name="gh",
+        skill_description="GitHub CLI",
+        plain_description="allow all gh commands",
+    )
+    call_kwargs = mock_chain.invoke.call_args[0][0]
+    assert call_kwargs["skill_name"] == "gh"
+    assert call_kwargs["skill_description"] == "GitHub CLI"
+    assert call_kwargs["plain_description"] == "allow all gh commands"
