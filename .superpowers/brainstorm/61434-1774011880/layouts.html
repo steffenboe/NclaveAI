@@ -1,0 +1,126 @@
+<h2>Which layout feels right?</h2>
+<p class="subtitle">Three approaches to sidebar + chat. Click one to select.</p>
+
+<div class="cards">
+
+  <!-- Option A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0d1117;border-radius:6px;font-size:11px;line-height:1.4;">
+      <div style="display:flex;height:220px;gap:6px;">
+        <!-- sidebar -->
+        <div style="width:28%;background:#161b22;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:4px;">
+          <div style="color:#58a6ff;font-size:10px;font-weight:700;margin-bottom:4px;">RUNS</div>
+          <div style="background:#1f4a6e;border-radius:3px;padding:4px 6px;color:#79c0ff;font-size:10px;">● list subdirs…</div>
+          <div style="background:#21262d;border-radius:3px;padding:4px 6px;color:#6e7681;font-size:10px;">✓ kubectl get pods</div>
+          <div style="background:#21262d;border-radius:3px;padding:4px 6px;color:#6e7681;font-size:10px;">✓ check deploy</div>
+          <div style="margin-top:auto;border-top:1px solid #30363d;padding-top:6px;">
+            <div style="color:#6e7681;font-size:10px;text-align:center;">⚙ Skills</div>
+          </div>
+        </div>
+        <!-- main -->
+        <div style="flex:1;background:#0d1117;border-radius:4px;display:flex;flex-direction:column;padding:8px;gap:6px;">
+          <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;gap:4px;">
+            <div style="background:#161b22;border-radius:3px;padding:5px 8px;color:#8b949e;font-size:10px;">$ ls ~/</div>
+            <div style="background:#161b22;border-radius:3px;padding:5px 8px;color:#3fb950;font-size:10px;">exit 0 · Documents Projects …</div>
+            <div style="background:#161b22;border-radius:3px;padding:5px 8px;color:#8b949e;font-size:10px;">$ ls ~/Projects</div>
+            <div style="background:#1f3a5f;border-radius:3px;padding:5px 8px;color:#58a6ff;font-size:10px;display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite"></span> running…</div>
+          </div>
+          <div style="background:#161b22;border-radius:4px;padding:6px 8px;display:flex;gap:6px;align-items:center;border:1px solid #30363d;">
+            <span style="flex:1;color:#484f58;font-size:10px;">Ask the agent something…</span>
+            <span style="background:#238636;color:#fff;border-radius:3px;padding:2px 6px;font-size:10px;">▶</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Classic chat (ChatGPT-style)</h3>
+      <p>Narrow left sidebar with run history. Main area is the full-width live execution view + input at bottom. Gear icon at sidebar bottom.</p>
+    </div>
+  </div>
+
+  <!-- Option B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0d1117;border-radius:6px;font-size:11px;line-height:1.4;">
+      <div style="display:flex;height:220px;gap:6px;">
+        <!-- main -->
+        <div style="flex:1;background:#0d1117;border-radius:4px;display:flex;flex-direction:column;padding:8px;gap:6px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+            <span style="color:#e6edf3;font-size:11px;font-weight:600;">Developer Companion</span>
+            <span style="color:#6e7681;font-size:10px;">⚙</span>
+          </div>
+          <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;gap:4px;">
+            <div style="background:#161b22;border-radius:3px;padding:5px 8px;color:#8b949e;font-size:10px;">$ ls ~/</div>
+            <div style="background:#161b22;border-radius:3px;padding:5px 8px;color:#3fb950;font-size:10px;">exit 0 · Documents Projects …</div>
+            <div style="background:#1f3a5f;border-radius:3px;padding:5px 8px;color:#58a6ff;font-size:10px;display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite"></span> running…</div>
+          </div>
+          <div style="background:#161b22;border-radius:4px;padding:6px 8px;display:flex;gap:6px;align-items:center;border:1px solid #30363d;">
+            <span style="flex:1;color:#484f58;font-size:10px;">Ask the agent something…</span>
+            <span style="background:#238636;color:#fff;border-radius:3px;padding:2px 6px;font-size:10px;">▶</span>
+          </div>
+        </div>
+        <!-- right sidebar -->
+        <div style="width:30%;background:#161b22;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:4px;">
+          <div style="color:#8b949e;font-size:10px;font-weight:700;margin-bottom:4px;">HISTORY</div>
+          <div style="background:#1f4a6e;border-radius:3px;padding:4px 6px;color:#79c0ff;font-size:10px;">● list subdirs…</div>
+          <div style="background:#21262d;border-radius:3px;padding:4px 6px;color:#6e7681;font-size:10px;">✓ kubectl get pods</div>
+          <div style="background:#21262d;border-radius:3px;padding:4px 6px;color:#6e7681;font-size:10px;">✓ check deploy</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Right sidebar</h3>
+      <p>Chat and input dominate the left. History is a right-side panel. Gear icon in the top-right of the header.</p>
+    </div>
+  </div>
+
+  <!-- Option C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0d1117;border-radius:6px;font-size:11px;line-height:1.4;">
+      <div style="display:flex;height:220px;gap:6px;">
+        <!-- sidebar -->
+        <div style="width:28%;background:#161b22;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:4px;">
+          <div style="color:#58a6ff;font-size:10px;font-weight:700;margin-bottom:4px;">RUNS</div>
+          <div style="background:#1f4a6e;border-radius:3px;padding:6px;color:#79c0ff;font-size:10px;">
+            <div style="font-weight:600;">list subdirs…</div>
+            <div style="color:#3fb950;font-size:9px;margin-top:2px;">● running</div>
+          </div>
+          <div style="background:#21262d;border-radius:3px;padding:6px;color:#6e7681;font-size:10px;">
+            <div>kubectl get pods</div>
+            <div style="color:#3fb950;font-size:9px;margin-top:2px;">✓ done</div>
+          </div>
+          <div style="background:#21262d;border-radius:3px;padding:6px;color:#6e7681;font-size:10px;">
+            <div>check deploy</div>
+            <div style="color:#f85149;font-size:9px;margin-top:2px;">✗ failed</div>
+          </div>
+          <div style="margin-top:auto;border-top:1px solid #30363d;padding-top:6px;display:flex;justify-content:flex-end;">
+            <span style="color:#6e7681;font-size:12px;">⚙</span>
+          </div>
+        </div>
+        <!-- main: two-zone -->
+        <div style="flex:1;background:#0d1117;border-radius:4px;display:flex;flex-direction:column;padding:8px;gap:6px;">
+          <div style="color:#8b949e;font-size:10px;font-weight:600;">list subdirs in home directory</div>
+          <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;gap:3px;">
+            <div style="background:#161b22;border-radius:3px;padding:5px 8px;color:#8b949e;font-size:10px;">$ ls ~/</div>
+            <div style="background:#161b22;border-radius:3px;padding:5px 8px;color:#3fb950;font-size:10px;">Documents Projects Desktop …</div>
+            <div style="background:#161b22;border-radius:3px;padding:5px 8px;color:#8b949e;font-size:10px;">$ ls ~/Projects</div>
+            <div style="background:#1f3a5f;border-radius:3px;padding:5px 8px;color:#58a6ff;font-size:10px;display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite"></span> running…</div>
+          </div>
+          <div style="border-top:1px solid #21262d;padding-top:6px;background:#161b22;border-radius:4px;padding:6px 8px;display:flex;gap:6px;align-items:center;border:1px solid #30363d;">
+            <span style="flex:1;color:#484f58;font-size:10px;">Ask the agent something…</span>
+            <span style="background:#238636;color:#fff;border-radius:3px;padding:2px 6px;font-size:10px;">▶</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Left sidebar with richer run cards</h3>
+      <p>Like A, but sidebar cards show prompt + status at a glance. The active run's prompt is shown as a heading above execution. Gear icon bottom-right of sidebar.</p>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .card-image { min-height: 240px; }
+</style>

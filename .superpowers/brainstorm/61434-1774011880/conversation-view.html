@@ -1,0 +1,102 @@
+<h2>Conversation view — main area</h2>
+<p class="subtitle">Each prompt is a user bubble. The agent's execution trace is the response below it.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Developer Companion &nbsp;·&nbsp; <span style="color:#8b949e;font-size:11px;">list subdirs in home directory</span></div>
+  <div class="mockup-body" style="display:flex;height:480px;">
+
+    <!-- Sidebar -->
+    <div style="width:220px;background:#161b22;border-right:1px solid #21262d;display:flex;flex-direction:column;padding:10px 8px;gap:6px;flex-shrink:0;">
+      <button style="background:#238636;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;margin-bottom:4px;">+ New chat</button>
+      <div style="font-size:10px;color:#6e7681;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin:4px 0 2px;">Today</div>
+
+      <!-- active conversation -->
+      <div style="background:#1f4a6e;border-radius:5px;padding:7px 9px;">
+        <div style="color:#79c0ff;font-size:11px;font-weight:600;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">list subdirs in home…</div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="display:inline-block;width:5px;height:5px;border:1.5px solid #58a6ff;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite"></span>
+          <span style="font-size:10px;color:#58a6ff;">running</span>
+        </div>
+      </div>
+
+      <!-- past conversation -->
+      <div style="background:#21262d;border-radius:5px;padding:7px 9px;cursor:pointer;">
+        <div style="color:#8b949e;font-size:11px;font-weight:600;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">kubectl get pods</div>
+        <div style="font-size:10px;color:#3fb950;">✓ done</div>
+      </div>
+
+      <div style="background:#21262d;border-radius:5px;padding:7px 9px;cursor:pointer;">
+        <div style="color:#8b949e;font-size:11px;font-weight:600;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">check deploy status</div>
+        <div style="font-size:10px;color:#f85149;">✗ failed</div>
+      </div>
+
+      <div style="margin-top:auto;display:flex;justify-content:flex-end;padding-top:8px;border-top:1px solid #30363d;">
+        <span style="color:#6e7681;font-size:16px;cursor:pointer;">⚙</span>
+      </div>
+    </div>
+
+    <!-- Main conversation area -->
+    <div style="flex:1;display:flex;flex-direction:column;background:#0d1117;overflow:hidden;">
+
+      <!-- Scrollable conversation feed -->
+      <div style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:16px;">
+
+        <!-- Turn 1: user prompt -->
+        <div style="display:flex;justify-content:flex-end;">
+          <div style="background:#1f4a6e;color:#c9d1d9;font-size:12px;padding:8px 12px;border-radius:10px 10px 2px 10px;max-width:70%;">
+            list subdirs in home directory
+          </div>
+        </div>
+
+        <!-- Turn 1: agent response -->
+        <div style="display:flex;flex-direction:column;gap:5px;max-width:85%;">
+          <div style="font-size:10px;color:#6e7681;margin-bottom:2px;">Agent</div>
+          <div style="background:#161b22;border:1px solid #21262d;border-radius:2px 10px 10px 10px;overflow:hidden;">
+            <div style="padding:7px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #21262d;">
+              <span style="color:#79c0ff;font-size:11px;font-family:monospace;">$ ls ~/ </span>
+              <span style="font-size:10px;color:#3fb950;margin-left:auto;">exit 0</span>
+              <span style="font-size:10px;background:#1a3a2a;color:#3fb950;border-radius:3px;padding:1px 6px;">global policy</span>
+            </div>
+            <div style="padding:6px 10px;font-size:11px;color:#8b949e;font-family:monospace;">Documents  Downloads  Projects  Desktop</div>
+          </div>
+          <div style="background:#161b22;border:1px solid #21262d;border-radius:10px;overflow:hidden;">
+            <div style="padding:7px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #21262d;">
+              <span style="color:#79c0ff;font-size:11px;font-family:monospace;">$ ls ~/Projects</span>
+              <span style="display:inline-block;width:8px;height:8px;border:1.5px solid #58a6ff;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-left:auto;"></span>
+              <span style="font-size:10px;color:#58a6ff;">running</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Turn 2: user follow-up (chained) -->
+        <div style="display:flex;justify-content:flex-end;">
+          <div style="background:#2d1f5e;color:#c9d1d9;font-size:12px;padding:8px 12px;border-radius:10px 10px 2px 10px;max-width:70%;border:1px solid #a371f730;">
+            now show me the git log of the llm-opa-agent project
+          </div>
+        </div>
+
+        <!-- Turn 2: pending (queued after current run) -->
+        <div style="display:flex;flex-direction:column;gap:5px;max-width:85%;">
+          <div style="font-size:10px;color:#6e7681;margin-bottom:2px;">Agent</div>
+          <div style="background:#161b22;border:1px solid #21262d;border-radius:2px 10px 10px 10px;padding:8px 12px;">
+            <span style="font-size:11px;color:#484f58;font-style:italic;">Waiting for current run to finish…</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Input box -->
+      <div style="padding:12px 16px;border-top:1px solid #21262d;background:#0d1117;">
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;display:flex;align-items:center;gap:8px;padding:8px 12px;">
+          <input style="flex:1;background:none;border:none;outline:none;color:#e6edf3;font-size:12px;font-family:inherit;" placeholder="Continue this chat…" />
+          <button style="background:#238636;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">▶</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>

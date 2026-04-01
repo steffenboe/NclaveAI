@@ -62,6 +62,14 @@ class RunRepository:
                 raise KeyError(run_id)
             return self._runs[run_id].model_copy()
 
+    def delete(self, run_id: str) -> None:
+        """Delete a single run by id. Thread-safe."""
+        with self._lock:
+            if run_id not in self._runs:
+                raise KeyError(run_id)
+            del self._runs[run_id]
+            self._save_all()
+
     def all_as_dict(self) -> dict[str, RunContext]:
         """Return a copy of all runs (by run_id) for populating _runs at startup."""
         with self._lock:

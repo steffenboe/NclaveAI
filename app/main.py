@@ -203,6 +203,45 @@ def list_runs() -> list[dict]:
         return [ctx.model_dump() for ctx in _runs.values()]
 
 
+def _collect_descendants(root_run_id: str) -> set[str]:
+    """Collect all descendants for a run (including root) by parent_run_id."""
+    to_visit = [root_run_id]
+    collected: set[str] = set()
+    while to_visit:
+        current = to_visit.pop()
+        if current in collected:
+            continue
+        collected.add(current)
+        with _runs_lock:
+            children = [
+                run_id
+                for run_id, ctx in _runs.items()
+                if ctx.parent_run_id == current
+            ]
+        to_visit.extend(children)
+    return collected
+
+
+@app.delete("/api/agent/runs/{run_id}", status_code=204)
+def delete_run(run_id: str, request: Request) -> None:
+    with _runs_lock:
+        if run_id not in _runs:
+            raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+
+    to_delete = _collect_descendants(run_id)
+
+    with _runs_lock:
+        for rid in to_delete:
+            _runs.pop(rid, None)
+
+    for rid in to_delete:
+        try:
+            request.app.state.run_repo.delete(rid)
+        except KeyError:
+            # Repo can be out of sync in tests/startup edge cases.
+            continue
+
+
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 class SettingsResponse(BaseModel):

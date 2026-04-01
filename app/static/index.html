@@ -60,9 +60,16 @@
       border-radius: 6px;
       cursor: pointer;
       transition: background 0.1s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     .sidebar-item:hover { background: #eaeef2; }
     .sidebar-item.active { background: #ddf4ff; }
+    .sidebar-main {
+      min-width: 0;
+      flex: 1;
+    }
     .sidebar-prompt {
       font-size: 12px;
       color: #1f2328;
@@ -73,6 +80,24 @@
     }
     .sidebar-item.active .sidebar-prompt { color: #0969da; }
     .sidebar-status { font-size: 11px; }
+    .sidebar-delete {
+      background: none;
+      border: none;
+      color: #848d97;
+      font-size: 12px;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 4px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.1s, color 0.1s, background 0.1s;
+    }
+    .sidebar-item:hover .sidebar-delete,
+    .sidebar-item.active .sidebar-delete { opacity: 1; }
+    .sidebar-delete:hover {
+      color: #cf222e;
+      background: #ffebe9;
+    }
 
     .sidebar-bottom {
       padding: 10px 12px;
@@ -689,6 +714,9 @@
       item.className = 'sidebar-item' + (rootId === selectedRootId ? ' active' : '');
       item.onclick = () => selectConversation(rootId);
 
+      const main = document.createElement('div');
+      main.className = 'sidebar-main';
+
       const prompt = document.createElement('div');
       prompt.className = 'sidebar-prompt';
       prompt.textContent = run.prompt;
@@ -697,8 +725,20 @@
       badge.className = 'sidebar-status';
       badge.innerHTML = statusHtml(status);
 
-      item.appendChild(prompt);
-      item.appendChild(badge);
+      const del = document.createElement('button');
+      del.className = 'sidebar-delete';
+      del.title = 'Delete conversation';
+      del.setAttribute('aria-label', 'Delete conversation');
+      del.innerHTML = '&#x1f5d1;';
+      del.onclick = (event) => {
+        event.stopPropagation();
+        deleteConversation(rootId);
+      };
+
+      main.appendChild(prompt);
+      main.appendChild(badge);
+      item.appendChild(main);
+      item.appendChild(del);
       list.appendChild(item);
     }
   }
@@ -998,6 +1038,30 @@
     loadConvSkillsForNewChat();
     render();
     document.getElementById('prompt-input').focus();
+  }
+
+  async function deleteConversation(rootId) {
+    try {
+      const res = await fetch('/api/agent/runs/' + rootId, { method: 'DELETE' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      const removeIds = new Set(getChain(rootId));
+      for (const rid of Array.from(removeIds)) {
+        delete runs[rid];
+      }
+      for (let i = runOrder.length - 1; i >= 0; i--) {
+        if (removeIds.has(runOrder[i])) runOrder.splice(i, 1);
+      }
+
+      if (selectedRootId === rootId) {
+        selectedRootId = null;
+        loadConvSkillsForNewChat();
+      }
+
+      render();
+    } catch (e) {
+      alert('Failed to delete conversation: ' + e.message);
+    }
   }
 
   // ── Settings ───────────────────────────────────────────

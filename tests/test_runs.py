@@ -74,6 +74,18 @@ def test_get_unknown_raises_key_error(repo):
         repo.get("nonexistent")
 
 
+def test_delete_removes_run_and_persists(repo):
+    repo.save(_make_run("r1"))
+    repo.delete("r1")
+    with pytest.raises(KeyError):
+        repo.get("r1")
+
+
+def test_delete_unknown_raises_key_error(repo):
+    with pytest.raises(KeyError):
+        repo.delete("missing")
+
+
 # ── JSON round-trip ───────────────────────────────────────────────────────────
 
 def test_json_round_trip(tmp_path):
@@ -238,3 +250,28 @@ def test_runs_survive_restart(tmp_path):
     assert res.status_code == 200
     ids = [r["run_id"] for r in res.json()]
     assert "r-persist" in ids
+
+
+def test_delete_run_deletes_chain(client_with_repo):
+    client, repo, _tmp_path = client_with_repo
+
+    root = RunContext(run_id="root", prompt="hello", status="done")
+    child = RunContext(run_id="child", prompt="follow-up", status="done", parent_run_id="root")
+    with _runs_lock:
+        _runs[root.run_id] = root
+        _runs[child.run_id] = child
+    repo.save(root)
+    repo.save(child)
+
+    res = client.delete("/api/agent/runs/root")
+    assert res.status_code == 204
+
+    res = client.get("/api/agent/runs")
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_delete_run_returns_404_for_missing(client_with_repo):
+    client, _repo, _tmp_path = client_with_repo
+    res = client.delete("/api/agent/runs/does-not-exist")
+    assert res.status_code == 404
