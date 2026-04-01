@@ -60,8 +60,7 @@ class AgentWorkflow:
 
             if plan_output.status in ("done", "failed"):
                 ctx.status = plan_output.status
-                if plan_output.status == "failed":
-                    ctx.final_message = plan_output.summary
+                ctx.final_message = plan_output.summary
                 break
 
             command = plan_output.command  # guaranteed non-None when status == "action"

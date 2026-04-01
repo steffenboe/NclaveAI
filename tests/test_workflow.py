@@ -190,20 +190,46 @@ def test_health_endpoint():
 def test_workflow_sets_final_message(workflow):
     workflow._planner.next_action.side_effect = [
         _planner_output(status="action"),
-        _planner_output(status="done"),
+        PlannerOutput(status="done", command=None, summary="Test summary."),
     ]
     workflow._executor.run.return_value = _action_result()
     ctx = workflow.run("investigate pods", "run-10")
     assert ctx.final_message == "Test summary."
-    workflow._planner.summarize.assert_called_once_with(ctx)
+    workflow._planner.summarize.assert_not_called()
+
+
+def test_workflow_done_uses_planner_summary_as_final_message(workflow):
+    """When planner returns done, plan_output.summary becomes final_message directly."""
+    workflow._planner.next_action.return_value = PlannerOutput(
+        status="done", command=None, summary="Task completed successfully."
+    )
+    ctx = workflow.run("diagnose", "run-11a")
+    assert ctx.status == "done"
+    assert ctx.final_message == "Task completed successfully."
+    workflow._planner.summarize.assert_not_called()
+
+
+def test_workflow_done_final_message_never_null_even_if_summarize_raises(workflow):
+    """done run must always have a non-null final_message — no blank UI turns."""
+    workflow._planner.next_action.return_value = PlannerOutput(
+        status="done", command=None, summary="Direct answer."
+    )
+    workflow._planner.summarize.side_effect = RuntimeError("LLM unavailable")
+    ctx = workflow.run("diagnose", "run-11b")
+    assert ctx.status == "done"
+    assert ctx.final_message is not None
 
 
 def test_workflow_survives_summarize_failure(workflow):
-    workflow._planner.next_action.return_value = _planner_output(status="done")
+    # summarize() is no longer called for 'done' status — plan_output.summary is used directly.
+    # This test verifies the run still completes successfully even if summarize were to raise.
+    workflow._planner.next_action.return_value = PlannerOutput(
+        status="done", command=None, summary="Fallback summary."
+    )
     workflow._planner.summarize.side_effect = RuntimeError("LLM unavailable")
     ctx = workflow.run("diagnose", "run-11")
     assert ctx.status == "done"
-    assert ctx.final_message is None
+    assert ctx.final_message == "Fallback summary."
 
 
 def test_runcontext_accepts_waiting_approval_status():

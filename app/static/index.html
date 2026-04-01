@@ -772,10 +772,10 @@
     }
 
     // AI summary for done runs
-    if (run.status === 'done' && run.final_message) {
+    if (run.status === 'done') {
       const summary = document.createElement('div');
       summary.className = 'summary-block';
-      summary.textContent = run.final_message;
+      summary.textContent = run.final_message || '(no response)';
       div.appendChild(summary);
     }
 
