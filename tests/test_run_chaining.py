@@ -7,12 +7,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.models import ActionResult, Command, RunContext
+from app.runs import RunRepository
 import app.main as main_module
 
 
 @pytest.fixture
-def client():
+def client(tmp_path):
     from app.main import app
+    repo = RunRepository(tmp_path / "runs.json")
+    app.state.run_repo = repo
     with TestClient(app) as c:
         yield c
 

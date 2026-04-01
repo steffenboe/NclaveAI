@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app, _runs, _runs_lock
 from app.models import RunContext
+from app.runs import RunRepository
 from app.skills import SkillRepository
 
 
@@ -22,6 +23,7 @@ def clear_runs():
 def client(tmp_path):
     repo = SkillRepository(tmp_path / "skills.json")
     app.state.skill_repo = repo
+    app.state.run_repo = RunRepository(tmp_path / "runs.json")
     return TestClient(app)
 
 
@@ -98,8 +100,9 @@ def test_patch_run_skill_sets_override(client, skill_and_run):
 
 def test_patch_run_skill_override_enables_disabled_skill(client, tmp_path):
     """Globally disabled skill can be enabled per-run."""
-    repo = SkillRepository(tmp_path / "skills.json")
+    repo = SkillRepository(tmp_path / "skills2.json")
     app.state.skill_repo = repo
+    app.state.run_repo = RunRepository(tmp_path / "runs2.json")
     c = TestClient(app)
 
     skill_res = c.post("/api/skills", json={"name": "gh", "description": "GitHub CLI", "enabled": False})
