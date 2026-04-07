@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import cast
+
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from app.config import settings
 from app.models import ActionResult, PlannerOutput, RunContext
@@ -94,12 +97,19 @@ def _format_history(history: list[ActionResult]) -> str:
 
 
 class Planner:
-    def __init__(self, skill_repo: SkillRepository) -> None:
+    def __init__(
+        self,
+        skill_repo: SkillRepository,
+        llm_base_url: str | None = None,
+        llm_api_key: str | None = None,
+        llm_model: str | None = None,
+    ) -> None:
         self._skill_repo = skill_repo
+        effective_api_key = llm_api_key if llm_api_key is not None else settings.llm_api_key
         llm = ChatOpenAI(
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
-            model=settings.llm_model,
+            base_url=llm_base_url or settings.llm_base_url,
+            api_key=SecretStr(effective_api_key) if effective_api_key else None,
+            model=llm_model or settings.llm_model,
             temperature=0,
         )
         structured_llm = llm.with_structured_output(PlannerOutput)
@@ -145,11 +155,11 @@ class Planner:
         )
 
     def next_action(self, ctx: RunContext) -> PlannerOutput:
-        return self._chain.invoke({
+        return cast(PlannerOutput, self._chain.invoke({
             "system_prompt": self._build_system_prompt(),
             "prompt": ctx.prompt,
             "history_str": _format_history(ctx.history),
-        })
+        }))
 
     def summarize(self, ctx: RunContext) -> str:
         return self._summarize_chain.invoke({

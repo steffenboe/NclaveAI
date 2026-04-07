@@ -36,6 +36,8 @@ _runs_lock = threading.Lock()
 
 # Approval gate state
 _approval_required: bool = False
+_llm_base_url: str = settings.llm_base_url
+_llm_api_key: str = settings.llm_api_key
 _settings_lock = threading.Lock()
 
 _pending_approvals: dict[str, "PendingApproval"] = {}
@@ -97,13 +99,22 @@ def _build_workflow(
 ) -> AgentWorkflow:
     all_skills = skill_repo.list()
     gate = None
+    llm_base_url = settings.llm_base_url
+    llm_api_key = settings.llm_api_key
     if run_id is not None and ctx is not None:
         with _settings_lock:
             need_approval = _approval_required
+            llm_base_url = _llm_base_url
+            llm_api_key = _llm_api_key
         if need_approval:
             gate = _make_approval_gate(run_id, ctx)
     return AgentWorkflow(
-        planner=Planner(skill_repo),
+        planner=Planner(
+            skill_repo,
+            llm_base_url=llm_base_url,
+            llm_api_key=llm_api_key,
+            llm_model=settings.llm_model,
+        ),
         policy=PolicyEvaluator(skills=all_skills),
         executor=CommandExecutor(),
         approval_gate=gate,
@@ -246,25 +257,47 @@ def delete_run(run_id: str, request: Request) -> None:
 
 class SettingsResponse(BaseModel):
     approval_required: bool
+    llm_base_url: str
+    has_llm_api_key: bool
 
 
 class SettingsPatchRequest(BaseModel):
-    approval_required: bool
+    approval_required: bool | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
 
 
 @app.get("/api/settings", response_model=SettingsResponse)
 def get_settings() -> SettingsResponse:
     with _settings_lock:
-        return SettingsResponse(approval_required=_approval_required)
+        return SettingsResponse(
+            approval_required=_approval_required,
+            llm_base_url=_llm_base_url,
+            has_llm_api_key=bool(_llm_api_key),
+        )
 
 
 @app.put("/api/settings", response_model=SettingsResponse)
 def put_settings(body: SettingsPatchRequest) -> SettingsResponse:
-    global _approval_required
+    global _approval_required, _llm_base_url, _llm_api_key
     with _settings_lock:
-        _approval_required = body.approval_required
-        value = _approval_required
-    return SettingsResponse(approval_required=value)
+        if body.approval_required is not None:
+            _approval_required = body.approval_required
+
+        if body.llm_base_url is not None:
+            trimmed_url = body.llm_base_url.strip()
+            if not trimmed_url:
+                raise HTTPException(status_code=422, detail="llm_base_url must not be empty")
+            _llm_base_url = trimmed_url
+
+        if body.llm_api_key is not None:
+            _llm_api_key = body.llm_api_key.strip()
+
+        return SettingsResponse(
+            approval_required=_approval_required,
+            llm_base_url=_llm_base_url,
+            has_llm_api_key=bool(_llm_api_key),
+        )
 
 
 # ── Approval ──────────────────────────────────────────────────────────────────
@@ -299,7 +332,15 @@ def list_skills(request: Request) -> list:
 
 @app.post("/api/skills/generate-policy")
 def generate_policy_endpoint(body: GeneratePolicyRequest, request: Request) -> dict:
-    planner = Planner(request.app.state.skill_repo)
+    with _settings_lock:
+        llm_base_url = _llm_base_url
+        llm_api_key = _llm_api_key
+    planner = Planner(
+        request.app.state.skill_repo,
+        llm_base_url=llm_base_url,
+        llm_api_key=llm_api_key,
+        llm_model=settings.llm_model,
+    )
     try:
         policy = planner.generate_policy(
             skill_name=body.skill_name,

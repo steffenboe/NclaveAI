@@ -436,12 +436,39 @@
       padding: 12px 14px;
       margin-bottom: 20px;
       display: flex;
-      align-items: center;
+      flex-direction: column;
+      align-items: stretch;
       gap: 10px;
     }
     .settings-section label {
       display: flex; align-items: center; gap: 8px;
       cursor: pointer; color: #636c76; font-size: 12px;
+    }
+    .settings-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .settings-field-title {
+      font-size: 11px;
+      color: #636c76;
+    }
+    .settings-field input {
+      background: #ffffff;
+      border: 1px solid #d0d7de;
+      border-radius: 5px;
+      color: #1f2328;
+      padding: 7px 9px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    .settings-field input:focus {
+      outline: none;
+      border-color: #0969da;
+    }
+    .settings-help {
+      font-size: 11px;
+      color: #848d97;
     }
 
     /* Skill cards */
@@ -607,6 +634,18 @@
                  style="accent-color:#a371f7;cursor:pointer;" />
           Require approval before each command
         </label>
+        <div class="settings-field">
+          <div class="settings-field-title">LLM endpoint</div>
+          <input type="text" id="llm-endpoint-input" placeholder="https://api.example.com/v1" />
+        </div>
+        <div class="settings-field">
+          <div class="settings-field-title">API token</div>
+          <input type="password" id="llm-token-input" placeholder="Leave empty to keep current token" onfocus="onLlmTokenFocus()" oninput="onLlmTokenInput()" />
+          <div class="settings-help" id="llm-token-help"></div>
+        </div>
+        <div class="form-actions" style="margin-top:0;">
+          <button class="btn-sm btn-secondary" onclick="saveLlmSettings()">Save LLM settings</button>
+        </div>
       </div>
       <!-- Skill form -->
       <div id="skill-form-container"></div>
@@ -618,6 +657,8 @@
 </div>
 
 <script>
+  const MASKED_TOKEN_VALUE = '********';
+
   // ── State ──────────────────────────────────────────────
   const runs = {};       // run_id → RunContext
   const runOrder = [];   // insertion order
@@ -1072,6 +1113,26 @@
       const data = await res.json();
       const toggle = document.getElementById('approval-toggle');
       if (toggle) toggle.checked = data.approval_required;
+      const endpointInput = document.getElementById('llm-endpoint-input');
+      if (endpointInput && typeof data.llm_base_url === 'string') {
+        endpointInput.value = data.llm_base_url;
+      }
+      const tokenInput = document.getElementById('llm-token-input');
+      const tokenHelp = document.getElementById('llm-token-help');
+      if (tokenInput) {
+        if (data.has_llm_api_key) {
+          tokenInput.value = MASKED_TOKEN_VALUE;
+          tokenInput.dataset.masked = 'true';
+        } else {
+          tokenInput.value = '';
+          tokenInput.dataset.masked = 'false';
+        }
+      }
+      if (tokenHelp) {
+        tokenHelp.textContent = data.has_llm_api_key
+          ? 'A token is currently configured and masked. Type a new one to replace it.'
+          : 'No token configured yet.';
+      }
     } catch {}
   }
 
@@ -1084,6 +1145,57 @@
       });
       if (!res.ok) checkbox.checked = !checkbox.checked;
     } catch { checkbox.checked = !checkbox.checked; }
+  }
+
+  function onLlmTokenFocus() {
+    const tokenInput = document.getElementById('llm-token-input');
+    if (!tokenInput) return;
+    if (tokenInput.dataset.masked === 'true') {
+      tokenInput.value = '';
+      tokenInput.dataset.masked = 'false';
+    }
+  }
+
+  function onLlmTokenInput() {
+    const tokenInput = document.getElementById('llm-token-input');
+    if (!tokenInput) return;
+    if (tokenInput.value !== MASKED_TOKEN_VALUE) {
+      tokenInput.dataset.masked = 'false';
+    }
+  }
+
+  async function saveLlmSettings() {
+    const endpointInput = document.getElementById('llm-endpoint-input');
+    const tokenInput = document.getElementById('llm-token-input');
+    const endpoint = endpointInput.value.trim();
+    const tokenRaw = tokenInput.value;
+    const token = tokenRaw.trim();
+    const tokenIsMasked = tokenInput.dataset.masked === 'true' && tokenRaw === MASKED_TOKEN_VALUE;
+
+    if (!endpoint) {
+      alert('LLM endpoint is required.');
+      endpointInput.focus();
+      return;
+    }
+
+    const payload = { llm_base_url: endpoint };
+    if (!tokenIsMasked && token) payload.llm_api_key = token;
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || ('HTTP ' + res.status));
+      }
+      await loadSettings();
+      alert('LLM settings saved.');
+    } catch (e) {
+      alert('Failed to save LLM settings: ' + e.message);
+    }
   }
 
   // ── Skills modal ───────────────────────────────────────

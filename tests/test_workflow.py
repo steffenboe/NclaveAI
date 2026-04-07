@@ -166,6 +166,11 @@ def test_api_start_run_returns_202():
             run_id="x", prompt="test", history=[], status="done"
         )
         mock_build.return_value = mock_wf
+        from pathlib import Path
+        from app.runs import RunRepository
+        from app.skills import SkillRepository
+        fastapi_app.state.run_repo = RunRepository(Path("/tmp/notesllm-test-runs.json"))
+        fastapi_app.state.skill_repo = SkillRepository(Path("/tmp/notesllm-test-skills.json"))
         client = TestClient(fastapi_app)
         response = client.post("/api/agent/run", json={"prompt": "fix pod"})
     assert response.status_code == 202
@@ -351,6 +356,8 @@ def test_api_get_settings_returns_approval_required():
     assert response.status_code == 200
     body = response.json()
     assert "approval_required" in body
+    assert "llm_base_url" in body
+    assert "has_llm_api_key" in body
     assert body["approval_required"] is False  # default
 
 
@@ -362,6 +369,25 @@ def test_api_put_settings_updates_approval_required():
     assert r.json()["approval_required"] is True
     # turn off again (clean up)
     client.put("/api/settings", json={"approval_required": False})
+
+
+def test_api_put_settings_updates_llm_endpoint_and_token():
+    client = TestClient(fastapi_app)
+    endpoint = "https://example-llm.invalid/v1"
+    response = client.put("/api/settings", json={
+        "llm_base_url": endpoint,
+        "llm_api_key": "test-token-123",
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["llm_base_url"] == endpoint
+    assert body["has_llm_api_key"] is True
+
+
+def test_api_put_settings_rejects_empty_llm_endpoint():
+    client = TestClient(fastapi_app)
+    response = client.put("/api/settings", json={"llm_base_url": "   "})
+    assert response.status_code == 422
 
 
 def test_api_approve_unknown_run_returns_404():
