@@ -189,12 +189,45 @@ The policy receives `input.argv` — the proposed command as a list of strings. 
 
 ## Development
 
-```sh
-# Run all tests
-pytest
+### Backend
 
-# Run with auto-reload
+```sh
+# Install Python dependencies (incl. dev extras)
+pip install -e ".[dev]"
+
+# Start the API server with auto-reload
 uvicorn app.main:app --reload --port 8081
+```
+
+### Frontend
+
+The UI lives in [`frontend/`](frontend/) and is built with [Vite](https://vite.dev/) + React.
+
+```sh
+cd frontend
+
+# Install Node dependencies (first time only)
+npm install
+
+# Start the dev server with hot-module reload
+# Proxies /api/* to the backend on :8081
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173) for the dev frontend (or [http://localhost:8081](http://localhost:8081) to use the last production build served by FastAPI).
+
+### Building the frontend for production
+
+```sh
+cd frontend && npm run build
+```
+
+This outputs the compiled assets to `app/static/`, which FastAPI serves at `/`.
+
+### Tests
+
+```sh
+pytest
 ```
 
 The test suite lives in [`tests/`](tests/) and uses `pytest` with `pytest-asyncio`. Contributions should include tests for any new behaviour.
