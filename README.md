@@ -1,102 +1,141 @@
 # llm-opa-agent
 
-A personal developer companion agent that runs locally on your machine. Give it a natural-language prompt, and it plans and executes a sequence of CLI commands using tools you define — validated against an OPA policy before each execution.
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-pytest-orange?logo=pytest)](tests/)
 
-![Dashboard](docs/dashboard.png)
+---
+
+A safe-to-use, local AI agent that turns natural-language prompts into CLI command sequences — with every command gated by an [OPA](https://www.openpolicyagent.org/) policy before execution.
+
+## Table of contents
+
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Getting started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Quick start](#quick-start)
+- [Skills](#skills)
+- [OPA policy](#opa-policy)
+- [Configuration](#configuration)
+- [API reference](#api-reference)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Features
+
+- **Natural-language task execution** — describe what you want in plain English; the agent figures out the commands
+- **Policy-gated execution** — every command is evaluated against a Rego policy before it runs; nothing executes without explicit permission
+- **Composable skills** — teach the agent new CLI tools by writing a short description; works with `kubectl`, `gh`, `terraform`, `docker`, or anything else you have installed
+- **Browser UI** — manage skills, trigger runs, and inspect execution history from a local web interface
+- **Webhook support** — trigger autonomous runs from external events (CI pipelines, alerts, etc.)
+- **OpenAI-compatible** — works with OpenAI, Azure OpenAI, Ollama, or any compatible endpoint
+- **Fully local** — nothing leaves your machine except LLM API calls
 
 ---
 
 ## How it works
 
+Each run follows a tight plan → validate → execute loop:
+
 ```
 prompt
-  └── Planner.next_action()     ← LLM decides: run command / done / failed
-        └── PolicyEvaluator.evaluate()  ← OPA allows or denies
-              └── CommandExecutor.run() ← subprocess executes
+  └── Planner.next_action()       ← LLM decides: run command / done / failed
+        └── PolicyEvaluator.evaluate()    ← OPA allows or denies
+              └── CommandExecutor.run()   ← subprocess executes
                     └── result appended to history → repeat
 ```
 
-The agent uses **skills** — descriptors you write that tell the LLM what CLI tools are available and how to invoke them. Add a skill for `kubectl`, `gh`, `terraform`, or anything else you have installed. Manage skills through the browser UI.
+The agent keeps iterating until the goal is reached, it hits `MAX_ITERATIONS`, or the policy blocks a required command.
 
 ---
 
-## Install
+## Getting started
 
-**Prerequisites:**
-- Python 3.12+
-- An OpenAI-compatible LLM endpoint (OpenAI, Azure OpenAI, Ollama, etc.)
-- Any CLI tools you want the agent to use (install them yourself with `brew`, `apt`, etc.)
+### Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| Python 3.12+ | |
+| OpenAI-compatible LLM endpoint | OpenAI, Azure OpenAI, [Ollama](https://ollama.com/), etc. |
+| CLI tools you want to use | Install them yourself with `brew`, `apt`, etc. |
+
+### Installation
 
 ```sh
-# 1. Clone and install
+# Clone the repository
 git clone <repo-url>
 cd llm-opa-agent
+
+# Install the package and dev dependencies
 pip install -e ".[dev]"
 
-# 2. Configure
+# Copy and fill in the environment file
 cp .env.example .env
-# Edit .env — set LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, POLICY_PATH at minimum
+```
 
-# 3. Create a policy (allow-all for development)
+Open `.env` and set at minimum: `LLM_BASE_URL`, `LLM_API_KEY`, and `POLICY_PATH`.
+
+### Quick start
+
+```sh
+# Create a permissive dev policy (⚠️ do not use in production)
 echo 'package ops.agent\ndefault allow = true' > /tmp/dev-policy.rego
-# Then set POLICY_PATH=/tmp/dev-policy.rego in .env
 
-# 4. Run
+# Point the agent at it
+echo 'POLICY_PATH=/tmp/dev-policy.rego' >> .env
+
+# Start the server
 uvicorn app.main:app --reload --port 8081
 ```
 
-Open `http://localhost:8081`.
+Open [http://localhost:8081](http://localhost:8081) in your browser.
 
 ---
 
-## First steps
+## Skills
 
-1. Open the **Skills** tab in the browser UI.
-2. Click **Add Skill** and describe a CLI tool you want the agent to use. Example:
+Skills tell the LLM which CLI tools are available and how to use them. Add and manage skills from the **Skills** tab in the UI.
 
-   **Name:** `kubectl`
+**Example skill — `kubectl`:**
 
-   **Description:**
-   ```
-   Kubernetes CLI. Use to inspect and manage cluster resources.
+```
+Name: kubectl
 
-   Common patterns:
-   - kubectl get pods -n <namespace>
-   - kubectl logs <pod> -n <namespace>
-   - kubectl describe deployment <name> -n <namespace>
-   - kubectl rollout restart deployment/<name> -n <namespace>
+Description:
+Kubernetes CLI. Use to inspect and manage cluster resources.
 
-   Always specify -n <namespace>. Never delete resources unless explicitly asked.
-   ```
+Common patterns:
+- kubectl get pods -n <namespace>
+- kubectl logs <pod> -n <namespace>
+- kubectl describe deployment <name> -n <namespace>
+- kubectl rollout restart deployment/<name> -n <namespace>
 
-3. Switch to **Manual Runs** and type a prompt. The agent will use your enabled skills.
+Always specify -n <namespace>. Never delete resources unless explicitly asked.
+```
 
----
-
-## Configuration
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `LLM_BASE_URL` | yes | — | Base URL of the OpenAI-compatible API |
-| `LLM_API_KEY` | yes | — | API key |
-| `LLM_MODEL` | no | `gpt-4.1` | Model name |
-| `POLICY_PATH` | yes | — | Absolute path to a `.rego` policy file |
-| `MAX_ITERATIONS` | no | `10` | Maximum plan→validate→execute cycles per run |
-| `SKILLS_FILE` | no | `./skills.json` | Path where skills are stored |
+Once a skill is saved and enabled, the agent can use it in any run. You can enable or disable individual skills per conversation.
 
 ---
 
-## OPA Policy
+## OPA policy
 
-The agent will not execute any command unless the policy returns `allow = true`. Set `POLICY_PATH` to point to a Rego file.
+The agent **will not execute any command** unless the policy returns `allow = true`. Point `POLICY_PATH` to a `.rego` file to control what the agent is allowed to do.
 
 **Allow-all (development only):**
+
 ```rego
 package ops.agent
+
 default allow = true
 ```
 
-**Example — restrict to read-only kubectl:**
+**Read-only `kubectl` (production example):**
+
 ```rego
 package ops.agent
 
@@ -110,24 +149,37 @@ allowed_prefixes := [
 
 allow {
   some prefix
-  prefix = allowed_prefixes[_]
-  array.slice(input.argv, 0, count(prefix)) = prefix
+  prefix := allowed_prefixes[_]
+  array.slice(input.argv, 0, count(prefix)) == prefix
 }
 ```
 
-The policy receives `input.argv` — the proposed command as a list of strings.
+The policy receives `input.argv` — the proposed command as a list of strings. You can inspect any other property of the command from within Rego as needed.
 
 ---
 
-## API
+## Configuration
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `LLM_BASE_URL` | yes | — | Base URL of the OpenAI-compatible API |
+| `LLM_API_KEY` | yes | — | API key |
+| `LLM_MODEL` | no | `gpt-4.1` | Model name |
+| `POLICY_PATH` | yes | — | Absolute path to a `.rego` policy file |
+| `MAX_ITERATIONS` | no | `10` | Maximum plan → validate → execute cycles per run |
+| `SKILLS_FILE` | no | `./skills.json` | Path where skills are persisted |
+
+---
+
+## API reference
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/agent/run` | Start a run. Body: `{"prompt": "..."}` |
-| `GET` | `/api/agent/runs/{run_id}` | Get run status and history |
 | `GET` | `/api/agent/runs` | List all runs |
+| `GET` | `/api/agent/runs/{run_id}` | Get run status and execution history |
 | `POST` | `/api/agent/webhook` | Accept a webhook payload and run autonomously |
-| `GET` | `/api/skills` | List skills |
+| `GET` | `/api/skills` | List all skills |
 | `POST` | `/api/skills` | Create a skill |
 | `PATCH` | `/api/skills/{id}` | Update a skill |
 | `DELETE` | `/api/skills/{id}` | Delete a skill |
@@ -138,9 +190,30 @@ The policy receives `input.argv` — the proposed command as a list of strings.
 ## Development
 
 ```sh
-# Run tests
+# Run all tests
 pytest
 
 # Run with auto-reload
 uvicorn app.main:app --reload --port 8081
 ```
+
+The test suite lives in [`tests/`](tests/) and uses `pytest` with `pytest-asyncio`. Contributions should include tests for any new behaviour.
+
+---
+
+## Contributing
+
+Contributions are welcome! Here's how to get involved:
+
+1. **Fork** the repository and create a feature branch (`git checkout -b feat/my-feature`)
+2. **Make your changes** — keep the scope focused and include tests
+3. **Run the test suite** (`pytest`) and make sure everything passes
+4. **Open a pull request** with a clear description of what you changed and why
+
+For significant changes, please open an issue first to discuss the approach.
+
+---
+
+## License
+
+[MIT](LICENSE) — © 2026 Exxeta AG
