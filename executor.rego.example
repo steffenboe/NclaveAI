@@ -1,47 +1,67 @@
 package ops.agent
 
-role_commands := {
-    "INFRA_OBSERVER": [
-        ["kubectl", "get"],
-        ["kubectl", "logs"],
-        ["kubectl", "describe"],
-        ["helm", "list"],
-        ["helm", "status"],
-    ],
-    "INFRA_OPERATOR": [
-        ["kubectl", "get"],
-        ["kubectl", "logs"],
-        ["kubectl", "describe"],
-        ["kubectl", "rollout"],
-        ["kubectl", "scale"],
-        ["helm", "list"],
-        ["helm", "status"],
-        ["helm", "upgrade"],
-    ],
-}
+# ---------------------------------------------------------------------------
+# Example: argv-based allow-list policy
+#
+# The policy receives `input.argv` — the proposed command as a list of strings.
+# Return `allow = true` for every command the agent is permitted to run.
+#
+# This example restricts the agent to read-only kubectl and helm operations,
+# plus a small set of safe git commands.  Adjust the allow-listed prefixes to
+# match the tools and subcommands you want the agent to use.
+# ---------------------------------------------------------------------------
 
 default allow = false
 
-# True when the command targets Kubernetes secret resources
-targets_secrets {
-    input.argv[_] = "secret"
-}
+# Read-only kubectl subcommands
+kubectl_readonly_prefixes := [
+    ["kubectl", "get"],
+    ["kubectl", "describe"],
+    ["kubectl", "logs"],
+    ["kubectl", "top"],
+    ["kubectl", "explain"],
+]
 
-targets_secrets {
-    input.argv[_] = "secrets"
-}
+# Read-only helm subcommands
+helm_readonly_prefixes := [
+    ["helm", "list"],
+    ["helm", "status"],
+    ["helm", "get"],
+    ["helm", "history"],
+]
 
-# INFRA_OBSERVER is not permitted to read secrets
-observer_secrets_forbidden {
-    input.roles[_] = "INFRA_OBSERVER"
-    targets_secrets
+# Safe git subcommands (no push / force operations)
+git_safe_prefixes := [
+    ["git", "log"],
+    ["git", "diff"],
+    ["git", "status"],
+    ["git", "show"],
+]
+
+# Block any command that targets Kubernetes Secret resources, even if the
+# subcommand would otherwise be allowed.
+targets_secrets {
+    input.argv[_] == "secret"
+}
+targets_secrets {
+    input.argv[_] == "secrets"
 }
 
 allow {
-    not observer_secrets_forbidden
-    some role
+    not targets_secrets
     some prefix
-    input.roles[_] = role
-    prefix = role_commands[role][_]
-    array.slice(input.argv, 0, count(prefix)) = prefix
+    prefix := kubectl_readonly_prefixes[_]
+    array.slice(input.argv, 0, count(prefix)) == prefix
+}
+
+allow {
+    some prefix
+    prefix := helm_readonly_prefixes[_]
+    array.slice(input.argv, 0, count(prefix)) == prefix
+}
+
+allow {
+    some prefix
+    prefix := git_safe_prefixes[_]
+    array.slice(input.argv, 0, count(prefix)) == prefix
 }
