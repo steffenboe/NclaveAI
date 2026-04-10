@@ -18,6 +18,7 @@ class Skill(BaseModel):
     enabled: bool = True
     policy: str | None = None   # rego rule bodies; None = no OPA authorization
     created_at: datetime
+    source: str = "local"       # "local" | "remote" — not persisted in skills.json
 
 
 _UNSET = object()
@@ -45,7 +46,10 @@ class SkillRepository:
 
     def _save(self) -> None:
         self._path.write_text(
-            json.dumps([s.model_dump(mode="json") for s in self._skills], indent=2)
+            json.dumps(
+                [s.model_dump(mode="json", exclude={"source"}) for s in self._skills],
+                indent=2,
+            )
         )
 
     def list(self) -> list[Skill]:

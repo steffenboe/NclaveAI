@@ -358,3 +358,17 @@ def test_api_skill_policy_returned_in_list(client):
     skills = client.get("/api/skills").json()
     assert "policy" in skills[0]
     assert skills[0]["policy"] == "allow { true }"
+
+
+# ── source field ───────────────────────────────────────────────────────────────
+
+def test_skill_default_source_is_local():
+    from datetime import datetime, timezone
+    s = Skill(id="x", name="n", description="d", created_at=datetime.now(timezone.utc))
+    assert s.source == "local"
+
+
+def test_skill_source_remote():
+    from datetime import datetime, timezone
+    s = Skill(id="x", name="n", description="d", created_at=datetime.now(timezone.utc), source="remote")
+    assert s.source == "remote"
