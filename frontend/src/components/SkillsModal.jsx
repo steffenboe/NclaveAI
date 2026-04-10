@@ -8,6 +8,10 @@ export default function SkillsModal({ onClose }) {
   const [llmToken, setLlmToken] = useState('')
   const [tokenMasked, setTokenMasked] = useState(false)
   const [tokenHelp, setTokenHelp] = useState('')
+  const [repoUrl, setRepoUrl] = useState('')
+  const [repoBranch, setRepoBranch] = useState('main')
+  const [savingRepo, setSavingRepo] = useState(false)
+  const [repoSaveError, setRepoSaveError] = useState('')
   const [skills, setSkills] = useState([])
   const [skillsRepoConfigured, setSkillsRepoConfigured] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -37,6 +41,9 @@ export default function SkillsModal({ onClose }) {
       setApprovalRequired(data.approval_required)
       if (typeof data.llm_base_url === 'string') setLlmEndpoint(data.llm_base_url)
       if (typeof data.skills_repo_configured === 'boolean') setSkillsRepoConfigured(data.skills_repo_configured)
+      if (typeof data.skills_repo_url === 'string') setRepoUrl(data.skills_repo_url)
+      else setRepoUrl('')
+      if (typeof data.skills_repo_branch === 'string') setRepoBranch(data.skills_repo_branch)
       if (data.has_llm_api_key) {
         setLlmToken(MASKED_TOKEN_VALUE)
         setTokenMasked(true)
@@ -84,6 +91,31 @@ export default function SkillsModal({ onClose }) {
       await loadSettings()
       alert('LLM settings saved.')
     } catch (e) { alert('Failed to save LLM settings: ' + e.message) }
+  }
+
+  async function saveRepoSettings() {
+    setSavingRepo(true)
+    setRepoSaveError('')
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          skills_repo_url: repoUrl.trim() || null,
+          skills_repo_branch: repoBranch.trim() || 'main',
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'HTTP ' + res.status)
+      }
+      await loadSettings()
+      await loadSkills()
+    } catch (e) {
+      setRepoSaveError(e.message)
+    } finally {
+      setSavingRepo(false)
+    }
   }
 
   function showSkillForm(skill) {
@@ -232,6 +264,36 @@ export default function SkillsModal({ onClose }) {
             </div>
           </div>
 
+          {/* Remote skill repository */}
+          <div className="settings-section">
+            <div className="settings-field">
+              <div className="settings-field-title">Remote skill repository URL</div>
+              <input
+                type="text"
+                value={repoUrl}
+                onChange={e => setRepoUrl(e.target.value)}
+                placeholder="https://github.com/org/skills-repo"
+              />
+            </div>
+            <div className="settings-field">
+              <div className="settings-field-title">Branch</div>
+              <input
+                type="text"
+                value={repoBranch}
+                onChange={e => setRepoBranch(e.target.value)}
+                placeholder="main"
+              />
+            </div>
+            {repoSaveError && (
+              <div className="settings-error">{repoSaveError}</div>
+            )}
+            <div className="form-actions" style={{ marginTop: 0 }}>
+              <button className="btn-sm btn-secondary" onClick={saveRepoSettings} disabled={savingRepo}>
+                {savingRepo ? 'Saving\u2026' : 'Save repo settings'}
+              </button>
+            </div>
+          </div>
+
           {/* Skill form */}
           {skillForm !== null && (
             <div className="skill-form">
@@ -304,15 +366,18 @@ export default function SkillsModal({ onClose }) {
                       </span>
                     </div>
                     <div className="skill-actions">
-                      <button
-                        className={'toggle-enabled' + (skill.enabled ? ' on' : '')}
-                        onClick={() => toggleSkill(skill)}
-                        disabled={skill.source === 'remote'}
-                      >
-                        {skill.enabled ? 'enabled' : 'disabled'}
-                      </button>
-                      {skill.source !== 'remote' && (
+                      {skill.source === 'remote' ? (
+                        <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
+                          {skill.enabled ? 'enabled' : 'disabled'}
+                        </span>
+                      ) : (
                         <>
+                          <button
+                            className={'toggle-enabled' + (skill.enabled ? ' on' : '')}
+                            onClick={() => toggleSkill(skill)}
+                          >
+                            {skill.enabled ? 'enabled' : 'disabled'}
+                          </button>
                           <button className="btn-sm btn-secondary" onClick={() => showSkillForm(skill)}>Edit</button>
                           <button className="btn-sm btn-danger" onClick={() => deleteSkill(skill.id)}>Del</button>
                         </>

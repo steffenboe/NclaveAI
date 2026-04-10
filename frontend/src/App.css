@@ -468,6 +468,14 @@ body {
   font-size: 11px;
   color: #848d97;
 }
+.settings-error {
+  font-size: 11px;
+  color: #cf222e;
+  background: #ffebe9;
+  border: 1px solid #cf222e;
+  border-radius: 4px;
+  padding: 5px 8px;
+}
 
 /* Skill cards */
 .skill-card {
@@ -495,6 +503,8 @@ button.btn-danger { background: #ffebe9; color: #cf222e; border: 1px solid #cf22
 button.btn-danger:hover { background: #ffd7d3; }
 button.toggle-enabled { cursor: pointer; font-size: 11px; color: #636c76; padding: 4px 9px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 5px; font-family: inherit; }
 button.toggle-enabled.on { color: #1a7f37; border-color: #2da44e; background: #dafbe1; }
+span.toggle-enabled.readonly { font-size: 11px; color: #9aa0a6; padding: 4px 9px; background: #f6f8fa; border: 1px solid #eaeef2; border-radius: 5px; cursor: default; user-select: none; }
+span.toggle-enabled.readonly.on { color: #1a7f37; border-color: #c8efce; background: #f0fbf2; }
 
 .skill-form {
   background: #f6f8fa;
