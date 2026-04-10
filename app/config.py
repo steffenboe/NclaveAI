@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,6 +20,9 @@ class Settings(BaseSettings):
     skills_file: Path = Path("./skills.json")
 
     runs_file: Path = Path("./runs.json")
+
+    skills_repo_url: Optional[str] = None
+    skills_repo_branch: str = "main"
 
 
 settings = Settings()
