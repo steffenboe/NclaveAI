@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -108,3 +111,75 @@ class SkillRepository:
         idx = self._find_index(id)  # raises KeyError if not found
         del self._skills[idx]
         self._save()
+
+
+class RemoteSkillRepository:
+    def __init__(
+        self,
+        repo_url: str,
+        branch: str = "main",
+        cache_dir: Path | None = None,
+    ) -> None:
+        self._repo_url = repo_url
+        self._branch = branch
+        if cache_dir is None:
+            url_hash = hashlib.md5(repo_url.encode()).hexdigest()[:12]
+            cache_dir = Path("/tmp") / f"llm-opa-agent-skills-{url_hash}"
+        self._cache_dir = Path(cache_dir)
+        self._skills: list[Skill] = []
+
+    def sync(self) -> list[Skill]:
+        if (self._cache_dir / ".git").exists():
+            cmd = ["git", "-C", str(self._cache_dir), "pull"]
+        else:
+            cmd = [
+                "git", "clone",
+                "--depth", "1",
+                "--branch", self._branch,
+                self._repo_url,
+                str(self._cache_dir),
+            ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git command failed (exit {result.returncode}): {result.stderr.strip()}"
+            )
+        self._skills = self._parse_yaml_files()
+        return list(self._skills)
+
+    def list_skills(self) -> list[Skill]:
+        return list(self._skills)
+
+    def _parse_yaml_files(self) -> list[Skill]:
+        skills: list[Skill] = []
+        for yaml_file in sorted(self._cache_dir.glob("*.yaml")):
+            if not yaml_file.is_file():
+                continue
+            try:
+                data = yaml.safe_load(yaml_file.read_text())
+                if not isinstance(data, dict):
+                    raise ValueError("YAML root must be a mapping")
+                name = data.get("name")
+                description = data.get("description")
+                if not name or not description:
+                    raise ValueError("'name' and 'description' are required")
+                skill_id = str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"{self._repo_url}#{yaml_file.name}",
+                    )
+                )
+                skills.append(
+                    Skill(
+                        id=skill_id,
+                        name=str(name),
+                        description=str(description),
+                        enabled=bool(data.get("enabled", True)),
+                        policy=data.get("policy") or None,
+                        created_at=datetime.now(timezone.utc),
+                        source="remote",
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Skipping %s: %s", yaml_file.name, exc)
+        return skills
