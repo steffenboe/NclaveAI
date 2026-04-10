@@ -264,3 +264,40 @@ def test_api_generate_policy_missing_field_returns_422():
         # missing skill_description and description
     })
     assert res.status_code == 422
+
+
+def test_system_prompt_includes_remote_skill(tmp_path):
+    repo = SkillRepository(tmp_path / "skills.json")  # empty local
+    planner = Planner.__new__(Planner)
+    planner._skill_repo = repo
+    planner._remote_skills = [
+        Skill(
+            id="r1",
+            name="remote-tool",
+            description="A remote tool description",
+            enabled=True,
+            created_at=datetime.now(timezone.utc),
+            source="remote",
+        )
+    ]
+    prompt = planner._build_system_prompt()
+    assert "remote-tool" in prompt
+    assert "A remote tool description" in prompt
+
+
+def test_system_prompt_excludes_disabled_remote_skill(tmp_path):
+    repo = SkillRepository(tmp_path / "skills.json")  # empty local
+    planner = Planner.__new__(Planner)
+    planner._skill_repo = repo
+    planner._remote_skills = [
+        Skill(
+            id="r1",
+            name="disabled-remote",
+            description="Should not appear",
+            enabled=False,
+            created_at=datetime.now(timezone.utc),
+            source="remote",
+        )
+    ]
+    prompt = planner._build_system_prompt()
+    assert "disabled-remote" not in prompt

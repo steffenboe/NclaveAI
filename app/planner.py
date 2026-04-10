@@ -100,11 +100,13 @@ class Planner:
     def __init__(
         self,
         skill_repo: SkillRepository,
+        remote_skills: list | None = None,
         llm_base_url: str | None = None,
         llm_api_key: str | None = None,
         llm_model: str | None = None,
     ) -> None:
         self._skill_repo = skill_repo
+        self._remote_skills: list = remote_skills or []
         effective_api_key = llm_api_key if llm_api_key is not None else settings.llm_api_key
         llm = ChatOpenAI(
             base_url=llm_base_url or settings.llm_base_url,
@@ -132,7 +134,9 @@ class Planner:
         self._policy_chain = policy_prompt | llm | StrOutputParser()
 
     def _build_system_prompt(self) -> str:
-        enabled = [s for s in self._skill_repo.list() if s.enabled]
+        local_enabled = [s for s in self._skill_repo.list() if s.enabled]
+        remote_enabled = [s for s in getattr(self, "_remote_skills", []) if s.enabled]
+        enabled = remote_enabled + local_enabled
         if not enabled:
             return (
                 "You are an autonomous developer companion agent.\n\n"
