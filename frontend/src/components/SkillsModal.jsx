@@ -9,6 +9,8 @@ export default function SkillsModal({ onClose }) {
   const [tokenMasked, setTokenMasked] = useState(false)
   const [tokenHelp, setTokenHelp] = useState('')
   const [skills, setSkills] = useState([])
+  const [skillsRepoConfigured, setSkillsRepoConfigured] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   // skillForm: null = hidden, {} = new skill, { skill } = editing existing
   const [skillForm, setSkillForm] = useState(null)
   const [form, setForm] = useState({ name: '', description: '', policy: '' })
@@ -34,6 +36,7 @@ export default function SkillsModal({ onClose }) {
       const data = await res.json()
       setApprovalRequired(data.approval_required)
       if (typeof data.llm_base_url === 'string') setLlmEndpoint(data.llm_base_url)
+      if (typeof data.skills_repo_configured === 'boolean') setSkillsRepoConfigured(data.skills_repo_configured)
       if (data.has_llm_api_key) {
         setLlmToken(MASKED_TOKEN_VALUE)
         setTokenMasked(true)
@@ -134,6 +137,19 @@ export default function SkillsModal({ onClose }) {
     const res = await fetch('/api/skills/' + id, { method: 'DELETE' })
     if (!res.ok) { alert('Failed to delete skill.'); return }
     await loadSkills()
+  }
+
+  async function syncRemoteSkills() {
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/skills/sync', { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'HTTP ' + res.status)
+      }
+      await loadSkills()
+    } catch (e) { alert('Sync failed: ' + e.message) }
+    finally { setSyncing(false) }
   }
 
   async function generatePolicy() {
@@ -276,7 +292,12 @@ export default function SkillsModal({ onClose }) {
               : skills.map(skill => (
                   <div key={skill.id} className="skill-card">
                     <div className="skill-info">
-                      <div className="skill-name">{skill.name}</div>
+                      <div className="skill-name">
+                        {skill.name}
+                        {skill.source === 'remote' && (
+                          <span className="remote-badge">remote</span>
+                        )}
+                      </div>
                       <div className="skill-desc">{skill.description}</div>
                       <span className={'policy-badge ' + (skill.policy ? 'has-policy' : 'no-policy')}>
                         {skill.policy ? 'policy set' : 'no policy'}
@@ -286,18 +307,30 @@ export default function SkillsModal({ onClose }) {
                       <button
                         className={'toggle-enabled' + (skill.enabled ? ' on' : '')}
                         onClick={() => toggleSkill(skill)}
+                        disabled={skill.source === 'remote'}
                       >
                         {skill.enabled ? 'enabled' : 'disabled'}
                       </button>
-                      <button className="btn-sm btn-secondary" onClick={() => showSkillForm(skill)}>Edit</button>
-                      <button className="btn-sm btn-danger" onClick={() => deleteSkill(skill.id)}>Del</button>
+                      {skill.source !== 'remote' && (
+                        <>
+                          <button className="btn-sm btn-secondary" onClick={() => showSkillForm(skill)}>Edit</button>
+                          <button className="btn-sm btn-danger" onClick={() => deleteSkill(skill.id)}>Del</button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))
             }
           </div>
 
-          <button className="modal-add-btn" onClick={() => showSkillForm(undefined)}>+ Add skill</button>
+          <div className="modal-skills-footer">
+            <button className="modal-add-btn" onClick={() => showSkillForm(undefined)}>+ Add skill</button>
+            {skillsRepoConfigured && (
+              <button className="btn-sm btn-secondary" onClick={syncRemoteSkills} disabled={syncing}>
+                {syncing ? 'Syncing\u2026' : 'Sync remote skills'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

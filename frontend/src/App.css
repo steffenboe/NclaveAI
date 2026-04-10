@@ -565,6 +565,31 @@ button.toggle-enabled.on { color: #1a7f37; border-color: #2da44e; background: #d
 }
 .modal-add-btn:hover { border-color: #0969da; color: #0969da; }
 
+.modal-skills-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.modal-skills-footer .modal-add-btn {
+  flex: 1;
+  margin-top: 0;
+}
+
+.remote-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #1f3a5f;
+  color: #58a6ff;
+  vertical-align: middle;
+}
+
 .no-items-msg { color: #848d97; font-size: 12px; font-style: italic; text-align: center; padding: 20px; }
 
 /* ── Per-conversation skills bar ─────────────────────── */
