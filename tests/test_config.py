@@ -6,19 +6,11 @@ def test_runs_file_default():
     assert str(s.runs_file) == "runs.json"
 
 
-def test_skills_repo_url_defaults_to_none(monkeypatch):
-    monkeypatch.delenv("SKILLS_REPO_URL", raising=False)
-    monkeypatch.delenv("SKILLS_REPO_BRANCH", raising=False)
-    from importlib import reload
-    import app.config as cfg
-    reload(cfg)
-    assert cfg.settings.skills_repo_url is None
+def test_settings_file_default():
+    s = Settings(policy_path="/tmp/policy")
+    assert str(s.settings_file) == "settings.json"
 
 
-def test_skills_repo_branch_defaults_to_main(monkeypatch):
-    monkeypatch.delenv("SKILLS_REPO_URL", raising=False)
-    monkeypatch.delenv("SKILLS_REPO_BRANCH", raising=False)
-    from importlib import reload
-    import app.config as cfg
-    reload(cfg)
-    assert cfg.settings.skills_repo_branch == "main"
+def test_skills_repo_url_not_on_settings():
+    s = Settings(policy_path="/tmp/policy")
+    assert not hasattr(s, "skills_repo_url")
