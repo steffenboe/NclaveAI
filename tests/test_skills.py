@@ -459,3 +459,92 @@ def test_api_settings_includes_skills_repo_configured_true(client_with_remote):
     res = client_with_remote.get("/api/settings")
     assert res.status_code == 200
     assert res.json()["skills_repo_configured"] is True
+
+
+# ── AppSettings repo URL via API ──────────────────────────────────────────────
+
+from unittest.mock import patch
+
+
+def test_api_settings_returns_skills_repo_url(tmp_path):
+    from app.settings_store import AppSettings, AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app_settings_repo.save(AppSettings(skills_repo_url="https://example.com/repo"))
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    res = client.get("/api/settings")
+    assert res.status_code == 200
+    assert res.json()["skills_repo_url"] == "https://example.com/repo"
+    assert res.json()["skills_repo_branch"] == "main"
+
+
+def test_api_settings_returns_null_url_when_not_configured(tmp_path):
+    from app.settings_store import AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    res = client.get("/api/settings")
+    assert res.status_code == 200
+    assert res.json()["skills_repo_url"] is None
+
+
+def test_api_put_settings_saves_repo_url(tmp_path):
+    from app.settings_store import AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    # We mock the RemoteSkillRepository so no real git call happens
+    with patch("app.main.RemoteSkillRepository") as MockRemote:
+        mock_repo = MagicMock()
+        MockRemote.return_value = mock_repo
+        res = client.put("/api/settings", json={
+            "skills_repo_url": "https://example.com/repo",
+            "skills_repo_branch": "develop",
+        })
+    assert res.status_code == 200
+    # URL is persisted
+    saved = app_settings_repo.load()
+    assert saved.skills_repo_url == "https://example.com/repo"
+    assert saved.skills_repo_branch == "develop"
+    # sync was called
+    mock_repo.sync.assert_called_once()
+
+
+def test_api_put_settings_clears_repo_url(tmp_path):
+    from app.settings_store import AppSettings, AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app_settings_repo.save(AppSettings(skills_repo_url="https://example.com/repo"))
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = MagicMock()  # pretend one is configured
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    res = client.put("/api/settings", json={"skills_repo_url": None})
+    assert res.status_code == 200
+    assert app.state.remote_skill_repo is None
+    saved = app_settings_repo.load()
+    assert saved.skills_repo_url is None
+
+
+def test_api_put_settings_returns_503_on_sync_failure(tmp_path):
+    from app.settings_store import AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    with patch("app.main.RemoteSkillRepository") as MockRemote:
+        mock_repo = MagicMock()
+        mock_repo.sync.side_effect = RuntimeError("git clone failed: not found")
+        MockRemote.return_value = mock_repo
+        res = client.put("/api/settings", json={"skills_repo_url": "https://bad.example.com/repo"})
+    assert res.status_code == 503
+    assert "git clone failed" in res.json()["detail"]
+    # URL is still saved despite sync failure
+    saved = app_settings_repo.load()
+    assert saved.skills_repo_url == "https://bad.example.com/repo"

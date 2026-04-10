@@ -21,6 +21,7 @@ from app.models import Command, RunContext
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 from app.runs import RunRepository
+from app.settings_store import AppSettings, AppSettingsRepository
 from app.skills import RemoteSkillRepository, SkillRepository
 from app.workflow import AgentWorkflow
 
@@ -28,6 +29,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
 )
+
+logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -83,18 +86,23 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.skill_repo = SkillRepository(settings.skills_file)
+    app_settings_repo = AppSettingsRepository(settings.settings_file)
+    app.state.app_settings_repo = app_settings_repo
+    app_settings = app_settings_repo.load()
+
     app.state.remote_skill_repo = None
-    if settings.skills_repo_url:
+    if app_settings.skills_repo_url:
         remote_repo = RemoteSkillRepository(
-            settings.skills_repo_url,
-            branch=settings.skills_repo_branch,
+            app_settings.skills_repo_url,
+            branch=app_settings.skills_repo_branch,
         )
         try:
             remote_repo.sync()
             app.state.remote_skill_repo = remote_repo
-            logger.info("Remote skills loaded from %s", settings.skills_repo_url)
+            logger.info("Remote skills loaded from %s", app_settings.skills_repo_url)
         except Exception as exc:
             logger.warning("Failed to load remote skills: %s", exc)
+
     run_repo = RunRepository(settings.runs_file)
     app.state.run_repo = run_repo
     with _runs_lock:
@@ -285,28 +293,38 @@ class SettingsResponse(BaseModel):
     llm_base_url: str
     has_llm_api_key: bool
     skills_repo_configured: bool
+    skills_repo_url: str | None
+    skills_repo_branch: str
 
 
 class SettingsPatchRequest(BaseModel):
     approval_required: bool | None = None
     llm_base_url: str | None = None
     llm_api_key: str | None = None
+    skills_repo_url: str | None = None
+    skills_repo_branch: str | None = None
 
 
 @app.get("/api/settings", response_model=SettingsResponse)
 def get_settings(request: Request) -> SettingsResponse:
+    app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
+    app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
     with _settings_lock:
         return SettingsResponse(
             approval_required=_approval_required,
             llm_base_url=_llm_base_url,
             has_llm_api_key=bool(_llm_api_key),
             skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None) is not None,
+            skills_repo_url=app_settings.skills_repo_url,
+            skills_repo_branch=app_settings.skills_repo_branch,
         )
 
 
 @app.put("/api/settings", response_model=SettingsResponse)
 def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsResponse:
     global _approval_required, _llm_base_url, _llm_api_key
+
+    # ── LLM settings (in-memory, unchanged) ──────────────────────────────────
     with _settings_lock:
         if body.approval_required is not None:
             _approval_required = body.approval_required
@@ -320,11 +338,36 @@ def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsRespon
         if body.llm_api_key is not None:
             _llm_api_key = body.llm_api_key.strip()
 
+    # ── Repo settings (persisted) ─────────────────────────────────────────────
+    if "skills_repo_url" in body.model_fields_set:
+        app_settings_repo: AppSettingsRepository = request.app.state.app_settings_repo
+        app_settings = app_settings_repo.load()
+        new_url = body.skills_repo_url.strip() if body.skills_repo_url else None
+        new_branch = body.skills_repo_branch.strip() if body.skills_repo_branch else app_settings.skills_repo_branch
+        app_settings = AppSettings(skills_repo_url=new_url, skills_repo_branch=new_branch)
+        app_settings_repo.save(app_settings)
+
+        if new_url:
+            remote_repo = RemoteSkillRepository(new_url, branch=new_branch)
+            try:
+                remote_repo.sync()
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            request.app.state.remote_skill_repo = remote_repo
+        else:
+            request.app.state.remote_skill_repo = None
+
+    app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
+    app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
+
+    with _settings_lock:
         return SettingsResponse(
             approval_required=_approval_required,
             llm_base_url=_llm_base_url,
             has_llm_api_key=bool(_llm_api_key),
             skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None) is not None,
+            skills_repo_url=app_settings.skills_repo_url,
+            skills_repo_branch=app_settings.skills_repo_branch,
         )
 
 
