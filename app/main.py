@@ -21,7 +21,7 @@ from app.models import Command, RunContext
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 from app.runs import RunRepository
-from app.skills import SkillRepository
+from app.skills import RemoteSkillRepository, SkillRepository
 from app.workflow import AgentWorkflow
 
 logging.basicConfig(
@@ -83,6 +83,18 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.skill_repo = SkillRepository(settings.skills_file)
+    app.state.remote_skill_repo = None
+    if settings.skills_repo_url:
+        remote_repo = RemoteSkillRepository(
+            settings.skills_repo_url,
+            branch=settings.skills_repo_branch,
+        )
+        try:
+            remote_repo.sync()
+            app.state.remote_skill_repo = remote_repo
+            logger.info("Remote skills loaded from %s", settings.skills_repo_url)
+        except Exception as exc:
+            logger.warning("Failed to load remote skills: %s", exc)
     run_repo = RunRepository(settings.runs_file)
     app.state.run_repo = run_repo
     with _runs_lock:
@@ -93,12 +105,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="notesllm-agent", version="0.1.0", lifespan=lifespan)
 
 
+def _all_skills(request: Request) -> list:
+    remote_repo = getattr(request.app.state, "remote_skill_repo", None)
+    remote = remote_repo.list_skills() if remote_repo else []
+    local = request.app.state.skill_repo.list()
+    return remote + local
+
+
 def _build_workflow(
     skill_repo: SkillRepository,
     run_id: str | None = None,
     ctx: RunContext | None = None,
+    remote_skill_repo=None,
 ) -> AgentWorkflow:
-    all_skills = skill_repo.list()
+    local_skills = skill_repo.list()
+    remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
+    all_skills = remote_skills + local_skills
     gate = None
     llm_base_url = settings.llm_base_url
     llm_api_key = settings.llm_api_key
@@ -112,6 +134,7 @@ def _build_workflow(
     return AgentWorkflow(
         planner=Planner(
             skill_repo,
+            remote_skills=remote_skills,
             llm_base_url=llm_base_url,
             llm_api_key=llm_api_key,
             llm_model=settings.llm_model,
@@ -177,6 +200,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
         parent_run_id=parent_run_id,
     )
     skill_repo = req.app.state.skill_repo
+    remote_skill_repo = getattr(req.app.state, "remote_skill_repo", None)
     run_repo = req.app.state.run_repo
 
     with _runs_lock:
@@ -184,7 +208,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
     run_repo.save(ctx)
 
     def _execute() -> None:
-        workflow = _build_workflow(skill_repo, run_id=run_id, ctx=ctx)
+        workflow = _build_workflow(skill_repo, run_id=run_id, ctx=ctx, remote_skill_repo=remote_skill_repo)
         result = workflow.run(
             prompt=request.prompt,
             max_iterations=settings.max_iterations,
@@ -260,6 +284,7 @@ class SettingsResponse(BaseModel):
     approval_required: bool
     llm_base_url: str
     has_llm_api_key: bool
+    skills_repo_configured: bool
 
 
 class SettingsPatchRequest(BaseModel):
@@ -269,17 +294,18 @@ class SettingsPatchRequest(BaseModel):
 
 
 @app.get("/api/settings", response_model=SettingsResponse)
-def get_settings() -> SettingsResponse:
+def get_settings(request: Request) -> SettingsResponse:
     with _settings_lock:
         return SettingsResponse(
             approval_required=_approval_required,
             llm_base_url=_llm_base_url,
             has_llm_api_key=bool(_llm_api_key),
+            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None) is not None,
         )
 
 
 @app.put("/api/settings", response_model=SettingsResponse)
-def put_settings(body: SettingsPatchRequest) -> SettingsResponse:
+def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsResponse:
     global _approval_required, _llm_base_url, _llm_api_key
     with _settings_lock:
         if body.approval_required is not None:
@@ -298,6 +324,7 @@ def put_settings(body: SettingsPatchRequest) -> SettingsResponse:
             approval_required=_approval_required,
             llm_base_url=_llm_base_url,
             has_llm_api_key=bool(_llm_api_key),
+            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None) is not None,
         )
 
 
@@ -328,7 +355,19 @@ def deny_command(run_id: str) -> dict:
 
 @app.get("/api/skills")
 def list_skills(request: Request) -> list:
-    return [s.model_dump(mode="json") for s in request.app.state.skill_repo.list()]
+    return [s.model_dump(mode="json") for s in _all_skills(request)]
+
+
+@app.post("/api/skills/sync")
+def sync_remote_skills(request: Request) -> dict:
+    remote_repo = getattr(request.app.state, "remote_skill_repo", None)
+    if remote_repo is None:
+        raise HTTPException(status_code=404, detail="No remote skill repository configured")
+    try:
+        remote_repo.sync()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"skills": [s.model_dump(mode="json") for s in _all_skills(request)]}
 
 
 @app.post("/api/skills/generate-policy")
@@ -374,6 +413,11 @@ def create_skill(body: SkillCreateRequest, request: Request) -> Any:
 
 @app.patch("/api/skills/{skill_id}")
 def patch_skill(skill_id: str, body: SkillPatchRequest, request: Request) -> Any:
+    remote_repo = getattr(request.app.state, "remote_skill_repo", None)
+    if remote_repo:
+        remote_ids = {s.id for s in remote_repo.list_skills()}
+        if skill_id in remote_ids:
+            raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)")
     try:
         kwargs = {}
         if "policy" in body.model_fields_set:
@@ -392,6 +436,11 @@ def patch_skill(skill_id: str, body: SkillPatchRequest, request: Request) -> Any
 
 @app.delete("/api/skills/{skill_id}", status_code=204)
 def delete_skill(skill_id: str, request: Request) -> None:
+    remote_repo = getattr(request.app.state, "remote_skill_repo", None)
+    if remote_repo:
+        remote_ids = {s.id for s in remote_repo.list_skills()}
+        if skill_id in remote_ids:
+            raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)")
     try:
         request.app.state.skill_repo.delete(skill_id)
     except KeyError:

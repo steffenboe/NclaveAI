@@ -372,3 +372,90 @@ def test_skill_source_remote():
     from datetime import datetime, timezone
     s = Skill(id="x", name="n", description="d", created_at=datetime.now(timezone.utc), source="remote")
     assert s.source == "remote"
+
+
+# ── Remote skills overlay ─────────────────────────────────────────────────────
+
+from unittest.mock import MagicMock
+
+
+@pytest.fixture
+def client_with_remote(tmp_path):
+    from app.skills import RemoteSkillRepository
+    from datetime import datetime, timezone
+
+    local_repo = SkillRepository(tmp_path / "skills.json")
+    local_repo.create(name="local-tool", description="A local skill")
+
+    remote_repo = MagicMock(spec=RemoteSkillRepository)
+    remote_skill = Skill(
+        id="remote-id-1",
+        name="remote-tool",
+        description="A remote skill",
+        enabled=True,
+        policy=None,
+        created_at=datetime.now(timezone.utc),
+        source="remote",
+    )
+    remote_repo.list_skills.return_value = [remote_skill]
+
+    app.state.skill_repo = local_repo
+    app.state.remote_skill_repo = remote_repo
+    yield TestClient(app)
+    # cleanup
+    app.state.remote_skill_repo = None
+
+
+def test_api_list_includes_remote_skills(client_with_remote):
+    res = client_with_remote.get("/api/skills")
+    assert res.status_code == 200
+    names = [s["name"] for s in res.json()]
+    assert "remote-tool" in names
+    assert "local-tool" in names
+
+
+def test_api_list_remote_skill_has_source_field(client_with_remote):
+    res = client_with_remote.get("/api/skills")
+    remote = next(s for s in res.json() if s["name"] == "remote-tool")
+    assert remote["source"] == "remote"
+
+
+def test_api_delete_remote_skill_returns_404(client_with_remote):
+    res = client_with_remote.delete("/api/skills/remote-id-1")
+    assert res.status_code == 404
+
+
+def test_api_patch_remote_skill_returns_404(client_with_remote):
+    res = client_with_remote.patch("/api/skills/remote-id-1", json={"name": "x"})
+    assert res.status_code == 404
+
+
+def test_api_sync_returns_combined_skills(client_with_remote):
+    res = client_with_remote.post("/api/skills/sync")
+    assert res.status_code == 200
+    names = [s["name"] for s in res.json()["skills"]]
+    assert "remote-tool" in names
+
+
+def test_api_sync_returns_404_when_no_remote_repo(tmp_path):
+    local_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.skill_repo = local_repo
+    app.state.remote_skill_repo = None
+    client = TestClient(app)
+    res = client.post("/api/skills/sync")
+    assert res.status_code == 404
+
+
+def test_api_settings_includes_skills_repo_configured_false(tmp_path):
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    client = TestClient(app)
+    res = client.get("/api/settings")
+    assert res.status_code == 200
+    assert res.json()["skills_repo_configured"] is False
+
+
+def test_api_settings_includes_skills_repo_configured_true(client_with_remote):
+    res = client_with_remote.get("/api/settings")
+    assert res.status_code == 200
+    assert res.json()["skills_repo_configured"] is True
