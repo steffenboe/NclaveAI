@@ -65,6 +65,7 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
           {availableModels.length > 0 && (
             <select
               className="model-selector"
+              aria-label="Model selector"
               value={selectedModel || ''}
               onChange={e => onModelChange(e.target.value)}
               disabled={isDisabled}

@@ -128,14 +128,19 @@ export default function SkillsModal({ onClose }) {
 
   async function saveModelSettings() {
     const models = availableModelsInput.split(',').map(m => m.trim()).filter(m => m)
+    const trimmedDefaultModel = defaultModel.trim()
     if (models.length === 0) { alert('At least one model is required.'); return }
-    if (!defaultModel.trim()) { alert('Default model is required.'); return }
+    if (!trimmedDefaultModel) { alert('Default model is required.'); return }
+    if (!models.includes(trimmedDefaultModel)) {
+      alert('Default model must be included in the available models list.')
+      return
+    }
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          default_model: defaultModel.trim(),
+          default_model: trimmedDefaultModel,
           available_models: models,
         }),
       })

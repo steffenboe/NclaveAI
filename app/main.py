@@ -394,7 +394,14 @@ def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsRespon
             _llm_api_key = body.llm_api_key.strip()
 
     # ── Repo settings (persisted) ─────────────────────────────────────────────
-    app_settings_repo: AppSettingsRepository = request.app.state.app_settings_repo
+    app_settings_repo: AppSettingsRepository | None = getattr(
+        request.app.state, "app_settings_repo", None
+    )
+    if app_settings_repo is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Application settings repository is unavailable",
+        )
     app_settings = app_settings_repo.load()
     settings_changed = False
 
@@ -420,8 +427,16 @@ def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsRespon
             request.app.state.remote_skill_repo = None
 
     # ── Model settings (persisted) ────────────────────────────────────────────
-    if body.default_model is not None:
-        app_settings.default_model = body.default_model
+    if "default_model" in body.model_fields_set:
+        if body.default_model is None:
+            app_settings.default_model = None
+        else:
+            trimmed_default_model = body.default_model.strip()
+            if not trimmed_default_model:
+                raise HTTPException(
+                    status_code=422, detail="default_model must not be empty"
+                )
+            app_settings.default_model = trimmed_default_model
         settings_changed = True
 
     if body.available_models is not None:

@@ -141,7 +141,7 @@ export default function App() {
           const data = await res.json()
           setAvailableModels(data.available_models)
           setDefaultModel(data.default_model)
-          setSelectedModel(data.default_model)
+          setSelectedModel(current => current ?? data.default_model)
         }
       } catch {}
     }
