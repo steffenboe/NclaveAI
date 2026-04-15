@@ -21,6 +21,8 @@ export default function SkillsModal({ onClose }) {
   const [policyPopupOpen, setPolicyPopupOpen] = useState(false)
   const [policyDesc, setPolicyDesc] = useState('')
   const [generating, setGenerating] = useState(false)
+  // detailSkill: null = hidden, skill object = showing details
+  const [detailSkill, setDetailSkill] = useState(null)
 
   useEffect(() => {
     loadSettings()
@@ -28,10 +30,15 @@ export default function SkillsModal({ onClose }) {
   }, [])
 
   useEffect(() => {
-    function onKeyDown(e) { if (e.key === 'Escape') onClose() }
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        if (detailSkill) setDetailSkill(null)
+        else onClose()
+      }
+    }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [onClose, detailSkill])
 
   async function loadSettings() {
     try {
@@ -294,6 +301,30 @@ export default function SkillsModal({ onClose }) {
             </div>
           </div>
 
+          {/* Remote skill detail view */}
+          {detailSkill !== null && (
+            <div className="skill-form" data-testid="remote-skill-detail">
+              <div className="skill-detail-field">
+                <label>Tool name</label>
+                <div className="skill-detail-value">{detailSkill.name}</div>
+              </div>
+              <div className="skill-detail-field">
+                <label>Description</label>
+                <div className="skill-detail-value skill-detail-description">{detailSkill.description}</div>
+              </div>
+              <div className="skill-detail-field">
+                <label>Policy (Rego rules)</label>
+                {detailSkill.policy
+                  ? <pre className="skill-detail-policy">{detailSkill.policy}</pre>
+                  : <div className="skill-detail-value skill-detail-no-policy">No policy set — falls through to the global policy.</div>
+                }
+              </div>
+              <div className="form-actions">
+                <button className="btn-sm btn-secondary" onClick={() => setDetailSkill(null)}>Close</button>
+              </div>
+            </div>
+          )}
+
           {/* Skill form */}
           {skillForm !== null && (
             <div className="skill-form">
@@ -367,9 +398,12 @@ export default function SkillsModal({ onClose }) {
                     </div>
                     <div className="skill-actions">
                       {skill.source === 'remote' ? (
-                        <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
-                          {skill.enabled ? 'enabled' : 'disabled'}
-                        </span>
+                        <>
+                          <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
+                            {skill.enabled ? 'enabled' : 'disabled'}
+                          </span>
+                          <button className="btn-sm btn-secondary" onClick={() => setDetailSkill(d => d?.id === skill.id ? null : skill)}>Details</button>
+                        </>
                       ) : (
                         <>
                           <button

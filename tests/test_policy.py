@@ -221,8 +221,8 @@ def test_unknown_skill_id_in_overrides_is_ignored():
         _cmd(["ls"]),
         skill_overrides={"nonexistent-id": True},
     )
-    # executor.rego allows ls, so this should still pass via global
-    assert allowed is True
+    # executor.rego is deny-all, so even with an unknown override the result is denied
+    assert allowed is False
 
 
 def test_no_overrides_falls_back_to_global_enabled_flag():
