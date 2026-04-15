@@ -68,7 +68,6 @@ export default function App() {
   }, [upsertRun])
 
   const loadConvSkills = useCallback(async (runId) => {
-    if (!runId) { setConvSkillsData([]); return }
     try {
       const res = await fetch(`/api/agent/runs/${runId}/skills`)
       if (res.ok) {
@@ -266,7 +265,10 @@ export default function App() {
         />
       </div>
       {skillsModalOpen && (
-        <SkillsModal onClose={() => setSkillsModalOpen(false)} />
+        <SkillsModal onClose={() => {
+          setSkillsModalOpen(false)
+          loadConvSkillsForNewChat()
+        }} />
       )}
     </>
   )
