@@ -6,18 +6,22 @@
       "version": "22"
     }
   },
-  "postCreateCommand": "pip install -e '.[dev]' && cd frontend && npm install",
+  "postCreateCommand": "pip install -e '.[dev]' && (cd frontend && npm install)",
   "forwardPorts": [8081, 5173],
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
-        "charliermarsh.ruff"
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python"
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "editor.formatOnSave": true
       }
     }
-  }
+  },
+  "remoteUser": "vscode"
 }
