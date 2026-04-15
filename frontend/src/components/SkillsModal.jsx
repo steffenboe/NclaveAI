@@ -15,6 +15,9 @@ export default function SkillsModal({ onClose }) {
   const [skills, setSkills] = useState([])
   const [skillsRepoConfigured, setSkillsRepoConfigured] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [defaultModel, setDefaultModel] = useState('')
+  const [availableModels, setAvailableModels] = useState([])
+  const [availableModelsInput, setAvailableModelsInput] = useState('')
   // skillForm: null = hidden, {} = new skill, { skill } = editing existing
   const [skillForm, setSkillForm] = useState(null)
   const [form, setForm] = useState({ name: '', description: '', policy: '' })
@@ -52,6 +55,11 @@ export default function SkillsModal({ onClose }) {
         setLlmToken('')
         setTokenMasked(false)
         setTokenHelp('No token configured yet.')
+      }
+      if (data.default_model) setDefaultModel(data.default_model)
+      if (data.available_models) {
+        setAvailableModels(data.available_models)
+        setAvailableModelsInput(data.available_models.join(', '))
       }
     } catch {}
   }
@@ -116,6 +124,28 @@ export default function SkillsModal({ onClose }) {
     } finally {
       setSavingRepo(false)
     }
+  }
+
+  async function saveModelSettings() {
+    const models = availableModelsInput.split(',').map(m => m.trim()).filter(m => m)
+    if (models.length === 0) { alert('At least one model is required.'); return }
+    if (!defaultModel.trim()) { alert('Default model is required.'); return }
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          default_model: defaultModel.trim(),
+          available_models: models,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'HTTP ' + res.status)
+      }
+      await loadSettings()
+      alert('Model settings saved.')
+    } catch (e) { alert('Failed to save model settings: ' + e.message) }
   }
 
   function showSkillForm(skill) {
@@ -290,6 +320,33 @@ export default function SkillsModal({ onClose }) {
             <div className="form-actions" style={{ marginTop: 0 }}>
               <button className="btn-sm btn-secondary" onClick={saveRepoSettings} disabled={savingRepo}>
                 {savingRepo ? 'Saving\u2026' : 'Save repo settings'}
+              </button>
+            </div>
+          </div>
+
+          {/* Model configuration */}
+          <div className="settings-section">
+            <div className="settings-field">
+              <div className="settings-field-title">Available models (comma-separated)</div>
+              <input
+                type="text"
+                value={availableModelsInput}
+                onChange={e => setAvailableModelsInput(e.target.value)}
+                placeholder="gpt-4.1, gpt-4o, claude-3-opus"
+              />
+            </div>
+            <div className="settings-field">
+              <div className="settings-field-title">Default model</div>
+              <input
+                type="text"
+                value={defaultModel}
+                onChange={e => setDefaultModel(e.target.value)}
+                placeholder="gpt-4.1"
+              />
+            </div>
+            <div className="form-actions" style={{ marginTop: 0 }}>
+              <button className="btn-sm btn-secondary" onClick={saveModelSettings}>
+                Save model settings
               </button>
             </div>
           </div>

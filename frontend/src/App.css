@@ -347,6 +347,31 @@ body {
 }
 .input-wrapper:focus-within { border-color: #0969da; }
 .input-wrapper.disabled { opacity: 0.5; }
+.model-selector {
+  flex-shrink: 0;
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #1f2328;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.model-selector:hover:not(:disabled) {
+  background: #eaeef2;
+  border-color: #c8cdd3;
+}
+.model-selector:focus {
+  border-color: #0969da;
+  background: #ffffff;
+}
+.model-selector:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 #prompt-input {
   flex: 1;
   background: none;

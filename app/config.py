@@ -9,6 +9,13 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://ai.exxeta.info"
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1"
+    available_models: list[str] = [
+        "gpt-4.1",
+        "gpt-4o",
+        "gpt-3.5-turbo",
+        "claude-3-opus",
+        "claude-3-sonnet",
+    ]
 
     max_iterations: int = 10
 
