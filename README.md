@@ -347,7 +347,8 @@ uv run uvicorn app.main:app --reload --port 8081
 
 ### Notes
 
-- **`libatomic` on NixOS** — `regopy` ships a pre-built shared library that links against `libatomic.so.1`. NixOS has no global `/usr/lib`, so the flake sets `LD_LIBRARY_PATH` to point at `gcc.cc.lib` to make the dynamic linker find it.
+- **`libatomic` on Linux/NixOS** — `regopy` ships a pre-built shared library that links against `libatomic.so.1`. On Linux systems such as NixOS, the flake sets `LD_LIBRARY_PATH` to point at `gcc.cc.lib` so the dynamic linker can find it.
+- **macOS** — `LD_LIBRARY_PATH` is not used in the same way on macOS, and the extra GCC runtime library may be unnecessary there.
 - **Python downloads disabled** — `UV_PYTHON_DOWNLOADS=never` and `UV_PYTHON` are set in the shell hook so `uv` always uses the Nix-provided Python and never attempts to download its own.
 - **`.env` file** — still required; the flake does not create it. See [Installation](#installation).
 
