@@ -20,7 +20,7 @@ from app.executor import CommandExecutor
 from app.models import Command, RunContext
 from app.planner import Planner
 from app.policy import PolicyEvaluator
-from app.runs import RunRepository
+from app.runs import RunRepository, _match_hint, _run_matches
 from app.settings_store import AppSettings, AppSettingsRepository
 from app.skills import RemoteSkillRepository, SkillRepository
 from app.workflow import AgentWorkflow
@@ -230,6 +230,50 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
     thread.start()
 
     return RunResponse(run_id=run_id, status="running")
+
+
+class SearchHit(BaseModel):
+    run_id: str
+    root_run_id: str
+    prompt: str
+    status: str
+    matched_in: str
+
+
+def _resolve_root_run_id(run_id: str) -> str:
+    """Walk parent_run_id chain to find the root run."""
+    visited: set[str] = set()
+    current = run_id
+    while True:
+        if current in visited:
+            return current
+        visited.add(current)
+        with _runs_lock:
+            ctx = _runs.get(current)
+        if ctx is None or ctx.parent_run_id is None:
+            return current
+        current = ctx.parent_run_id
+
+
+@app.get("/api/agent/runs/search", response_model=list[SearchHit])
+def search_runs(q: str = "") -> list[SearchHit]:
+    """Full-text search across all runs (prompt, summary, command history)."""
+    if not q.strip():
+        return []
+    query = q.lower()
+    with _runs_lock:
+        runs_snapshot = list(_runs.values())
+    hits: list[SearchHit] = []
+    for ctx in runs_snapshot:
+        if _run_matches(ctx, query):
+            hits.append(SearchHit(
+                run_id=ctx.run_id,
+                root_run_id=_resolve_root_run_id(ctx.run_id),
+                prompt=ctx.prompt,
+                status=ctx.status,
+                matched_in=_match_hint(ctx, query),
+            ))
+    return hits
 
 
 @app.get("/api/agent/runs/{run_id}")
