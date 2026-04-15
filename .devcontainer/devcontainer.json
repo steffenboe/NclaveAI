@@ -6,7 +6,7 @@
       "version": "22"
     }
   },
-  "postCreateCommand": "pip install -e '.[dev]' && (cd frontend && npm install)",
+  "postCreateCommand": "pip install -e '.[dev]' && (cd frontend && npm ci)",
   "forwardPorts": [8081, 5173],
   "customizations": {
     "vscode": {
