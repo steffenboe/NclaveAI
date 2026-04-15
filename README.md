@@ -22,6 +22,7 @@ A safe-to-use, local AI agent that turns natural-language prompts into CLI comma
 - [API reference](#api-reference)
 - [Development](#development)
 - [Contributing](#contributing)
+- [NixOS / Nix dev shell](#nixos--nix-dev-shell)
 - [License](#license)
 
 ---
@@ -312,6 +313,43 @@ Contributions are welcome! Here's how to get involved:
 4. **Open a pull request** with a clear description of what you changed and why
 
 For significant changes, please open an issue first to discuss the approach.
+
+---
+
+## NixOS / Nix dev shell
+
+The repository ships a `flake.nix` for reproducible development on NixOS (or any system with Nix flakes enabled).
+
+### What the flake provides
+
+| Package | Purpose |
+|---|---|
+| `python312` | Python 3.12 runtime (matches `requires-python = ">=3.12"`) |
+| `uv` | Python package manager — installs deps from `uv.lock` into `.venv` |
+| `nodejs_22` | Node.js for the React/Vite frontend |
+| `gcc.cc.lib` | GCC runtime libs — required by `regopy`'s bundled native `.so` (`libatomic.so.1`) |
+
+On shell entry, `uv sync` automatically creates `.venv` and installs all Python dependencies.
+
+### Enter the dev shell
+
+```sh
+nix develop
+```
+
+### Start the backend
+
+```sh
+uv run uvicorn app.main:app --reload --port 8081
+```
+
+`uvicorn` is not on `PATH` directly — use `uv run` to invoke it from the managed `.venv`.
+
+### Notes
+
+- **`libatomic` on NixOS** — `regopy` ships a pre-built shared library that links against `libatomic.so.1`. NixOS has no global `/usr/lib`, so the flake sets `LD_LIBRARY_PATH` to point at `gcc.cc.lib` to make the dynamic linker find it.
+- **Python downloads disabled** — `UV_PYTHON_DOWNLOADS=never` and `UV_PYTHON` are set in the shell hook so `uv` always uses the Nix-provided Python and never attempts to download its own.
+- **`.env` file** — still required; the flake does not create it. See [Installation](#installation).
 
 ---
 
