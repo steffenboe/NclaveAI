@@ -190,6 +190,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
     run_id = str(uuid.uuid4())
 
     seeded_history: list = []
+    history_start_index = 0
     seeded_overrides: dict[str, bool] = {}
     parent_run_id: str | None = None
     if request.context_run_id is not None:
@@ -197,6 +198,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
             parent_ctx = _runs.get(request.context_run_id)
         if parent_ctx is not None:
             seeded_history = copy.deepcopy(parent_ctx.history)
+            history_start_index = len(seeded_history)
             seeded_overrides = dict(parent_ctx.skill_overrides)
             parent_run_id = request.context_run_id
 
@@ -204,6 +206,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
         run_id=run_id,
         prompt=request.prompt,
         history=seeded_history,
+        history_start_index=history_start_index,
         skill_overrides=seeded_overrides,
         parent_run_id=parent_run_id,
     )
@@ -543,6 +546,7 @@ class RunSkillResponse(BaseModel):
     enabled: bool
     effective_enabled: bool
     policy: str | None
+    source: str
     created_at: Any
 
 
@@ -558,6 +562,7 @@ def _run_skill_response(skill, overrides: dict[str, bool]) -> RunSkillResponse:
         enabled=skill.enabled,
         effective_enabled=overrides.get(skill.id, skill.enabled),
         policy=skill.policy,
+        source=skill.source,
         created_at=skill.created_at,
     )
 
@@ -568,7 +573,7 @@ def get_run_skills(run_id: str, request: Request) -> list[RunSkillResponse]:
         ctx = _runs.get(run_id)
     if ctx is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
-    skills = request.app.state.skill_repo.list()
+    skills = _all_skills(request)
     return [_run_skill_response(s, ctx.skill_overrides) for s in skills]
 
 
@@ -583,9 +588,8 @@ def patch_run_skill(
         ctx = _runs.get(run_id)
     if ctx is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
-    try:
-        skill = request.app.state.skill_repo.get(skill_id)
-    except KeyError:
+    skill = next((candidate for candidate in _all_skills(request) if candidate.id == skill_id), None)
+    if skill is None:
         raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} not found")
     with _runs_lock:
         ctx.skill_overrides[skill_id] = body.enabled

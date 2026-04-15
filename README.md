@@ -157,8 +157,7 @@ description: |
 ```yaml
 name: kubectl-readonly
 description: |
-  Read-only Kubernetes CLI access. Use to inspect cluster state.
-  Do NOT attempt to create, delete, patch, or apply resources.
+  Kubernetes CLI access.
 enabled: true
 policy: |
   allowed := {"get", "describe", "logs", "top", "version", "cluster-info"}

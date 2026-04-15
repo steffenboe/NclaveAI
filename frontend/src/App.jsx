@@ -201,6 +201,9 @@ export default function App() {
       ? getChain(runsRef.current, runOrderRef.current, selectedRootId)
       : []
     const contextRunId = chain.length > 0 ? chain[chain.length - 1] : null
+    const inheritedHistoryLength = contextRunId
+      ? (runsRef.current[contextRunId]?.history?.length ?? 0)
+      : 0
 
     const body = { prompt }
     if (contextRunId) body.context_run_id = contextRunId
@@ -213,7 +216,14 @@ export default function App() {
     if (!res.ok) throw new Error('HTTP ' + res.status)
     const data = await res.json()
 
-    upsertRun({ run_id: data.run_id, prompt, status: 'running', history: [], parent_run_id: contextRunId })
+    upsertRun({
+      run_id: data.run_id,
+      prompt,
+      status: 'running',
+      history: [],
+      history_start_index: inheritedHistoryLength,
+      parent_run_id: contextRunId,
+    })
     if (!contextRunId) setSelectedRootId(data.run_id)
 
     await applyPendingOverrides(data.run_id)

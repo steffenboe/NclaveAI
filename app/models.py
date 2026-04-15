@@ -37,6 +37,7 @@ class RunContext(BaseModel):
     run_id: str
     prompt: str
     history: list[ActionResult] = []
+    history_start_index: int = 0
     status: Literal["running", "done", "failed", "policy_denied", "waiting_approval"] = "running"
     final_message: str | None = None
     pending_command: dict[str, Any] | None = None
