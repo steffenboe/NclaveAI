@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const MASKED_TOKEN_VALUE = '********'
 
@@ -23,6 +23,11 @@ export default function SkillsModal({ onClose }) {
   const [generating, setGenerating] = useState(false)
   // detailSkill: null = hidden, skill object = showing details
   const [detailSkill, setDetailSkill] = useState(null)
+  const detailSkillRef = useRef(null)
+
+  useEffect(() => {
+    detailSkillRef.current = detailSkill
+  }, [detailSkill])
 
   useEffect(() => {
     loadSettings()
@@ -32,13 +37,13 @@ export default function SkillsModal({ onClose }) {
   useEffect(() => {
     function onKeyDown(e) {
       if (e.key === 'Escape') {
-        if (detailSkill) setDetailSkill(null)
+        if (detailSkillRef.current) setDetailSkill(null)
         else onClose()
       }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClose, detailSkill])
+  }, [onClose])
 
   async function loadSettings() {
     try {
@@ -304,19 +309,19 @@ export default function SkillsModal({ onClose }) {
           {/* Remote skill detail view */}
           {detailSkill !== null && (
             <div className="skill-form" data-testid="remote-skill-detail">
-              <div className="skill-detail-field">
+              <div>
                 <label>Tool name</label>
                 <div className="skill-detail-value">{detailSkill.name}</div>
               </div>
-              <div className="skill-detail-field">
+              <div>
                 <label>Description</label>
-                <div className="skill-detail-value skill-detail-description">{detailSkill.description}</div>
+                <div className="skill-detail-value">{detailSkill.description}</div>
               </div>
-              <div className="skill-detail-field">
+              <div>
                 <label>Policy (Rego rules)</label>
                 {detailSkill.policy
                   ? <pre className="skill-detail-policy">{detailSkill.policy}</pre>
-                  : <div className="skill-detail-value skill-detail-no-policy">No policy set — falls through to the global policy.</div>
+                  : <div className="skill-detail-value">No policy set — falls through to the global policy.</div>
                 }
               </div>
               <div className="form-actions">

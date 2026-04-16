@@ -295,11 +295,21 @@ This outputs the compiled assets to `app/static/`, which FastAPI serves at `/`.
 
 ### Tests
 
+**Backend (Python):**
+
 ```sh
 pytest
 ```
 
 The test suite lives in [`tests/`](tests/) and uses `pytest` with `pytest-asyncio`. Contributions should include tests for any new behaviour.
+
+**Frontend (JavaScript):**
+
+```sh
+cd frontend && npm run test
+```
+
+Frontend tests use [Vitest](https://vitest.dev/) with [Testing Library](https://testing-library.com/). They live in [`frontend/src/`](frontend/src/) alongside the components they cover.
 
 ---
 
@@ -309,7 +319,7 @@ Contributions are welcome! Here's how to get involved:
 
 1. **Fork** the repository and create a feature branch (`git checkout -b feat/my-feature`)
 2. **Make your changes** — keep the scope focused and include tests
-3. **Run the test suite** (`pytest`) and make sure everything passes
+3. **Run the test suites** (`pytest` and `cd frontend && npm run test`) and make sure everything passes
 4. **Open a pull request** with a clear description of what you changed and why
 
 For significant changes, please open an issue first to discuss the approach.
