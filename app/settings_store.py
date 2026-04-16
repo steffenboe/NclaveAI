@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 class AppSettings(BaseModel):
     skills_repo_url: str | None = None
     skills_repo_branch: str = "main"
+    default_model: str | None = None
+    available_models: list[str] = []
 
 
 class AppSettingsRepository:
@@ -29,6 +31,4 @@ class AppSettingsRepository:
             return AppSettings()
 
     def save(self, s: AppSettings) -> None:
-        self._path.write_text(
-            json.dumps(s.model_dump(mode="json"), indent=2)
-        )
+        self._path.write_text(json.dumps(s.model_dump(mode="json"), indent=2))

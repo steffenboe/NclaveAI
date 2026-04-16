@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import CommandCard from './CommandCard'
 import ApprovalCard from './ApprovalCard'
 
-export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDeny, onSubmit }) {
+export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDeny, onSubmit, availableModels, selectedModel, onModelChange }) {
   const [prompt, setPrompt] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const feedRef = useRef(null)
@@ -44,14 +44,10 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
           : chain.map(runId => {
               const run = runs[runId]
               if (!run) return null
-              const parentHistoryLen = run.parent_run_id
-                ? (runs[run.parent_run_id]?.history?.length ?? 0)
-                : 0
               return (
                 <ConversationTurn
                   key={runId}
                   run={run}
-                  parentHistoryLength={parentHistoryLen}
                   onApprove={onApprove}
                   onDeny={onDeny}
                 />
@@ -62,6 +58,19 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
 
       <div className="input-area">
         <div className={'input-wrapper' + (isDisabled ? ' disabled' : '')}>
+          {availableModels.length > 0 && (
+            <select
+              className="model-selector"
+              aria-label="Model selector"
+              value={selectedModel || ''}
+              onChange={e => onModelChange(e.target.value)}
+              disabled={isDisabled}
+            >
+              {availableModels.map(model => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+          )}
           <input
             id="prompt-input"
             value={prompt}
@@ -82,10 +91,10 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
   )
 }
 
-function ConversationTurn({ run, parentHistoryLength, onApprove, onDeny }) {
+function ConversationTurn({ run, onApprove, onDeny }) {
   const [actionPending, setActionPending] = useState(false)
-  const ownActions = (run.history || []).slice(parentHistoryLength)
-  const showThinking = run.status === 'running' && (!run.history || run.history.length === 0)
+  const ownActions = (run.history || []).slice(run.history_start_index || 0)
+  const showThinking = run.status === 'running' && ownActions.length === 0
 
   async function handleApprove() {
     setActionPending(true)

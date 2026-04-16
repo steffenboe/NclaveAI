@@ -149,6 +149,7 @@ def test_terminal_runs_survive_restart(tmp_path):
     path = tmp_path / "runs.json"
     path.write_text(json.dumps([{
         "run_id": "r1", "prompt": "p", "history": [],
+        "history_start_index": 0,
         "status": "done", "final_message": "great",
         "pending_command": None, "parent_run_id": None,
         "skill_overrides": {},
@@ -167,6 +168,13 @@ def test_all_as_dict_returns_copies(repo):
     # Mutating the returned object should not affect the repo
     d["r1"].status = "failed"
     assert repo.get("r1").status == "done"
+
+
+def test_history_start_index_persisted(repo, runs_file):
+    ctx = RunContext(run_id="r1", prompt="test", history_start_index=3, status="done")
+    repo.save(ctx)
+    data = json.loads(runs_file.read_text())
+    assert data[0]["history_start_index"] == 3
 
 
 # ── Integration: persistence wired into the app ───────────────────────────────

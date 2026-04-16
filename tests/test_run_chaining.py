@@ -102,6 +102,29 @@ def test_new_run_seeded_with_parent_history(client):
     assert captured.get("history_len") == 1
 
 
+def test_new_run_tracks_history_start_index_from_parent(client):
+    cmd = Command(argv=["ls", "/"], rationale="list root")
+    action = ActionResult(command=cmd, allowed=True, exit_code=0, stdout="bin etc")
+    parent = RunContext(
+        run_id="parent-1",
+        prompt="first prompt",
+        status="done",
+        history=[action],
+    )
+    main_module._runs["parent-1"] = parent
+
+    with patch("app.main._build_workflow", return_value=_fake_workflow()):
+        resp = client.post("/api/agent/run", json={
+            "prompt": "follow up",
+            "context_run_id": "parent-1",
+        })
+
+    new_run_id = resp.json()["run_id"]
+    time.sleep(0.05)
+    ctx = main_module._runs[new_run_id]
+    assert ctx.history_start_index == 1
+
+
 def test_start_run_without_context_run_id_works_normally(client):
     """POST without context_run_id behaves as before (no parent_run_id)."""
     with patch("app.main._build_workflow", return_value=_fake_workflow()):
