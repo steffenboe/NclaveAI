@@ -80,6 +80,7 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
             ctx.status = "running"
 
         return approval.approved
+
     return gate
 
 
@@ -132,6 +133,7 @@ def _build_workflow(
     gate = None
     llm_base_url = settings.llm_base_url
     llm_api_key = settings.llm_api_key
+    llm_model = settings.llm_model
     if run_id is not None and ctx is not None:
         with _settings_lock:
             need_approval = _approval_required
@@ -139,13 +141,16 @@ def _build_workflow(
             llm_api_key = _llm_api_key
         if need_approval:
             gate = _make_approval_gate(run_id, ctx)
+        # Use model from context if set, otherwise use default
+        if ctx.llm_model is not None:
+            llm_model = ctx.llm_model
     return AgentWorkflow(
         planner=Planner(
             skill_repo,
             remote_skills=remote_skills,
             llm_base_url=llm_base_url,
             llm_api_key=llm_api_key,
-            llm_model=settings.llm_model,
+            llm_model=llm_model,
         ),
         policy=PolicyEvaluator(skills=all_skills),
         executor=CommandExecutor(),
@@ -155,9 +160,11 @@ def _build_workflow(
 
 # ── Manual run ────────────────────────────────────────────────────────────────
 
+
 class RunRequest(BaseModel):
     prompt: str
     context_run_id: str | None = None
+    llm_model: str | None = None
 
 
 class RunResponse(BaseModel):
@@ -193,6 +200,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
     history_start_index = 0
     seeded_overrides: dict[str, bool] = {}
     parent_run_id: str | None = None
+    seeded_model: str | None = request.llm_model
     history_snapshot: list = []
     if request.context_run_id is not None:
         with _runs_lock:
@@ -201,6 +209,9 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
                 history_snapshot = list(parent_ctx.history)
                 seeded_overrides = dict(parent_ctx.skill_overrides)
                 parent_run_id = request.context_run_id
+                # Inherit model from parent if not explicitly set
+                if seeded_model is None:
+                    seeded_model = parent_ctx.llm_model
         if parent_run_id is not None:
             seeded_history = copy.deepcopy(history_snapshot)
             history_start_index = len(seeded_history)
@@ -212,6 +223,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
         history_start_index=history_start_index,
         skill_overrides=seeded_overrides,
         parent_run_id=parent_run_id,
+        llm_model=seeded_model,
     )
     skill_repo = req.app.state.skill_repo
     remote_skill_repo = getattr(req.app.state, "remote_skill_repo", None)
@@ -222,7 +234,9 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
     run_repo.save(ctx)
 
     def _execute() -> None:
-        workflow = _build_workflow(skill_repo, run_id=run_id, ctx=ctx, remote_skill_repo=remote_skill_repo)
+        workflow = _build_workflow(
+            skill_repo, run_id=run_id, ctx=ctx, remote_skill_repo=remote_skill_repo
+        )
         result = workflow.run(
             prompt=request.prompt,
             max_iterations=settings.max_iterations,
@@ -308,9 +322,7 @@ def _collect_descendants(root_run_id: str) -> set[str]:
         collected.add(current)
         with _runs_lock:
             children = [
-                run_id
-                for run_id, ctx in _runs.items()
-                if ctx.parent_run_id == current
+                run_id for run_id, ctx in _runs.items() if ctx.parent_run_id == current
             ]
         to_visit.extend(children)
     return collected
@@ -336,7 +348,37 @@ def delete_run(run_id: str, request: Request) -> None:
             continue
 
 
+# ── Models ────────────────────────────────────────────────────────────────────
+
+
+class ModelsResponse(BaseModel):
+    available_models: list[str]
+    default_model: str
+
+
+@app.get("/api/models", response_model=ModelsResponse)
+def get_models(request: Request) -> ModelsResponse:
+    app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
+    app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
+
+    # Use settings from AppSettings if configured, otherwise fall back to config
+    available_models = (
+        app_settings.available_models
+        if app_settings.available_models
+        else settings.available_models
+    )
+    default_model = (
+        app_settings.default_model if app_settings.default_model else settings.llm_model
+    )
+
+    return ModelsResponse(
+        available_models=available_models,
+        default_model=default_model,
+    )
+
+
 # ── Settings ──────────────────────────────────────────────────────────────────
+
 
 class SettingsResponse(BaseModel):
     approval_required: bool
@@ -345,6 +387,8 @@ class SettingsResponse(BaseModel):
     skills_repo_configured: bool
     skills_repo_url: str | None
     skills_repo_branch: str
+    default_model: str | None
+    available_models: list[str]
 
 
 class SettingsPatchRequest(BaseModel):
@@ -353,6 +397,8 @@ class SettingsPatchRequest(BaseModel):
     llm_api_key: str | None = None
     skills_repo_url: str | None = None
     skills_repo_branch: str | None = None
+    default_model: str | None = None
+    available_models: list[str] | None = None
 
 
 @app.get("/api/settings", response_model=SettingsResponse)
@@ -364,9 +410,16 @@ def get_settings(request: Request) -> SettingsResponse:
             approval_required=_approval_required,
             llm_base_url=_llm_base_url,
             has_llm_api_key=bool(_llm_api_key),
-            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None) is not None,
+            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None)
+            is not None,
             skills_repo_url=app_settings.skills_repo_url,
             skills_repo_branch=app_settings.skills_repo_branch,
+            default_model=app_settings.default_model
+            if app_settings.default_model
+            else settings.llm_model,
+            available_models=app_settings.available_models
+            if app_settings.available_models
+            else settings.available_models,
         )
 
 
@@ -382,20 +435,36 @@ def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsRespon
         if body.llm_base_url is not None:
             trimmed_url = body.llm_base_url.strip()
             if not trimmed_url:
-                raise HTTPException(status_code=422, detail="llm_base_url must not be empty")
+                raise HTTPException(
+                    status_code=422, detail="llm_base_url must not be empty"
+                )
             _llm_base_url = trimmed_url
 
         if body.llm_api_key is not None:
             _llm_api_key = body.llm_api_key.strip()
 
     # ── Repo settings (persisted) ─────────────────────────────────────────────
+    app_settings_repo: AppSettingsRepository | None = getattr(
+        request.app.state, "app_settings_repo", None
+    )
+    if app_settings_repo is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Application settings repository is unavailable",
+        )
+    app_settings = app_settings_repo.load()
+    settings_changed = False
+
     if "skills_repo_url" in body.model_fields_set:
-        app_settings_repo: AppSettingsRepository = request.app.state.app_settings_repo
-        app_settings = app_settings_repo.load()
         new_url = body.skills_repo_url.strip() if body.skills_repo_url else None
-        new_branch = body.skills_repo_branch.strip() if body.skills_repo_branch else app_settings.skills_repo_branch
-        app_settings = AppSettings(skills_repo_url=new_url, skills_repo_branch=new_branch)
-        app_settings_repo.save(app_settings)
+        new_branch = (
+            body.skills_repo_branch.strip()
+            if body.skills_repo_branch
+            else app_settings.skills_repo_branch
+        )
+        app_settings.skills_repo_url = new_url
+        app_settings.skills_repo_branch = new_branch
+        settings_changed = True
 
         if new_url:
             remote_repo = RemoteSkillRepository(new_url, branch=new_branch)
@@ -407,28 +476,57 @@ def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsRespon
         else:
             request.app.state.remote_skill_repo = None
 
-    app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
-    app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
+    # ── Model settings (persisted) ────────────────────────────────────────────
+    if "default_model" in body.model_fields_set:
+        if body.default_model is None:
+            app_settings.default_model = None
+        else:
+            trimmed_default_model = body.default_model.strip()
+            if not trimmed_default_model:
+                raise HTTPException(
+                    status_code=422, detail="default_model must not be empty"
+                )
+            app_settings.default_model = trimmed_default_model
+        settings_changed = True
+
+    if body.available_models is not None:
+        app_settings.available_models = body.available_models
+        settings_changed = True
+
+    if settings_changed:
+        app_settings_repo.save(app_settings)
+
+    app_settings = app_settings_repo.load()
 
     with _settings_lock:
         return SettingsResponse(
             approval_required=_approval_required,
             llm_base_url=_llm_base_url,
             has_llm_api_key=bool(_llm_api_key),
-            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None) is not None,
+            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None)
+            is not None,
             skills_repo_url=app_settings.skills_repo_url,
             skills_repo_branch=app_settings.skills_repo_branch,
+            default_model=app_settings.default_model
+            if app_settings.default_model
+            else settings.llm_model,
+            available_models=app_settings.available_models
+            if app_settings.available_models
+            else settings.available_models,
         )
 
 
 # ── Approval ──────────────────────────────────────────────────────────────────
+
 
 @app.post("/api/agent/runs/{run_id}/approve", status_code=200)
 def approve_command(run_id: str) -> dict:
     with _pending_approvals_lock:
         approval = _pending_approvals.pop(run_id, None)
     if approval is None:
-        raise HTTPException(status_code=404, detail=f"No pending approval for run {run_id!r}")
+        raise HTTPException(
+            status_code=404, detail=f"No pending approval for run {run_id!r}"
+        )
     approval.approved = True
     approval.event.set()
     return {"status": "approved"}
@@ -439,12 +537,15 @@ def deny_command(run_id: str) -> dict:
     with _pending_approvals_lock:
         approval = _pending_approvals.pop(run_id, None)
     if approval is None:
-        raise HTTPException(status_code=404, detail=f"No pending approval for run {run_id!r}")
+        raise HTTPException(
+            status_code=404, detail=f"No pending approval for run {run_id!r}"
+        )
     approval.event.set()  # approved stays False
     return {"status": "denied"}
 
 
 # ── Skills ────────────────────────────────────────────────────────────────────
+
 
 @app.get("/api/skills")
 def list_skills(request: Request) -> list:
@@ -455,7 +556,9 @@ def list_skills(request: Request) -> list:
 def sync_remote_skills(request: Request) -> dict:
     remote_repo = getattr(request.app.state, "remote_skill_repo", None)
     if remote_repo is None:
-        raise HTTPException(status_code=404, detail="No remote skill repository configured")
+        raise HTTPException(
+            status_code=404, detail="No remote skill repository configured"
+        )
     try:
         remote_repo.sync()
     except RuntimeError as exc:
@@ -510,7 +613,9 @@ def patch_skill(skill_id: str, body: SkillPatchRequest, request: Request) -> Any
     if remote_repo:
         remote_ids = {s.id for s in remote_repo.list_skills()}
         if skill_id in remote_ids:
-            raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)")
+            raise HTTPException(
+                status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)"
+            )
     try:
         kwargs = {}
         if "policy" in body.model_fields_set:
@@ -533,7 +638,9 @@ def delete_skill(skill_id: str, request: Request) -> None:
     if remote_repo:
         remote_ids = {s.id for s in remote_repo.list_skills()}
         if skill_id in remote_ids:
-            raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)")
+            raise HTTPException(
+                status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)"
+            )
     try:
         request.app.state.skill_repo.delete(skill_id)
     except KeyError:
@@ -541,6 +648,7 @@ def delete_skill(skill_id: str, request: Request) -> None:
 
 
 # ── Per-run skill overrides ───────────────────────────────────────────────────
+
 
 class RunSkillResponse(BaseModel):
     id: str
@@ -601,6 +709,7 @@ def patch_run_skill(
 
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
+
 
 @app.get("/health")
 def health() -> dict:

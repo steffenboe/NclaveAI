@@ -26,11 +26,10 @@ class ActionResult(BaseModel):
     command: Command
     allowed: bool
     policy_reason: str | None = None
-    skill_name: str | None = None   # None = global policy fallback or denied
+    skill_name: str | None = None  # None = global policy fallback or denied
     stdout: str | None = None
     stderr: str | None = None
     exit_code: int | None = None
-
 
 
 class RunContext(BaseModel):
@@ -38,8 +37,11 @@ class RunContext(BaseModel):
     prompt: str
     history: list[ActionResult] = []
     history_start_index: int = 0
-    status: Literal["running", "done", "failed", "policy_denied", "waiting_approval"] = "running"
+    status: Literal[
+        "running", "done", "failed", "policy_denied", "waiting_approval"
+    ] = "running"
     final_message: str | None = None
     pending_command: dict[str, Any] | None = None
     parent_run_id: str | None = None
     skill_overrides: dict[str, bool] = {}
+    llm_model: str | None = None
