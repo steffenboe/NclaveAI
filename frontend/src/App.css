@@ -47,6 +47,27 @@ body {
 }
 .btn-new-chat:hover { background: #2da44e; }
 
+.sidebar-search-wrap {
+  margin-top: 8px;
+}
+.sidebar-search {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #d0d7de;
+  border-radius: 5px;
+  color: #1f2328;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.sidebar-search:focus {
+  outline: none;
+  border-color: #0969da;
+}
+.sidebar-search::-webkit-search-cancel-button { cursor: pointer; }
+.sidebar-match-hint { font-size: 10px; }
+.sidebar-match-in { color: #848d97; font-style: italic; }
+
 .sidebar-list {
   flex: 1;
   overflow-y: auto;

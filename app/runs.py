@@ -74,3 +74,49 @@ class RunRepository:
         """Return a copy of all runs (by run_id) for populating _runs at startup."""
         with self._lock:
             return {run_id: ctx.model_copy() for run_id, ctx in self._runs.items()}
+
+    def search(self, query: str) -> list[RunContext]:
+        """Return all runs whose text fields contain *query* (case-insensitive)."""
+        q = query.lower()
+        results = []
+        with self._lock:
+            snapshot = list(self._runs.values())
+        for ctx in snapshot:
+            if _run_matches(ctx, q):
+                results.append(ctx.model_copy())
+        return results
+
+
+def _run_matches(ctx: RunContext, q: str) -> bool:
+    if q in (ctx.prompt or "").lower():
+        return True
+    if q in (ctx.final_message or "").lower():
+        return True
+    for result in ctx.history:
+        if q in " ".join(result.command.argv).lower():
+            return True
+        if q in (result.command.rationale or "").lower():
+            return True
+        if q in (result.stdout or "").lower():
+            return True
+        if q in (result.stderr or "").lower():
+            return True
+    return False
+
+
+def _match_hint(ctx: RunContext, q: str) -> str:
+    if q in (ctx.prompt or "").lower():
+        return "prompt"
+    if q in (ctx.final_message or "").lower():
+        return "summary"
+    for i, result in enumerate(ctx.history):
+        if q in " ".join(result.command.argv).lower():
+            return f"history[{i}].command"
+        if q in (result.command.rationale or "").lower():
+            return f"history[{i}].rationale"
+        if q in (result.stdout or "").lower():
+            return f"history[{i}].stdout"
+        if q in (result.stderr or "").lower():
+            return f"history[{i}].stderr"
+    return "text"
+

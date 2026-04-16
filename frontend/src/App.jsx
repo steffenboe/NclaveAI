@@ -39,6 +39,8 @@ export default function App() {
   const [availableModels, setAvailableModels] = useState([])
   const [defaultModel, setDefaultModel] = useState(null)
   const [selectedModel, setSelectedModel] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
 
   const pendingOverridesRef = useRef({})
   const pollingRef = useRef(new Set())
@@ -48,6 +50,21 @@ export default function App() {
   const runOrderRef = useRef(runOrder)
   useEffect(() => { runsRef.current = runs }, [runs])
   useEffect(() => { runOrderRef.current = runOrder }, [runOrder])
+
+  // Debounced keyword search across all runs
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+    const tid = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/agent/runs/search?q=' + encodeURIComponent(searchQuery))
+        if (res.ok) setSearchResults(await res.json())
+      } catch {}
+    }, 300)
+    return () => clearTimeout(tid)
+  }, [searchQuery])
 
   const upsertRun = useCallback((run) => {
     setRuns(prev => ({ ...prev, [run.run_id]: run }))
@@ -278,6 +295,9 @@ export default function App() {
         onSelectConversation={selectConversation}
         onDeleteConversation={deleteConversation}
         onOpenSettings={() => setSkillsModalOpen(true)}
+        searchQuery={searchQuery}
+        searchResults={searchResults}
+        onSearch={setSearchQuery}
       />
       <div className="main">
         <ConversationFeed
