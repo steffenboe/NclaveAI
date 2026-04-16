@@ -28,6 +28,7 @@ def test_action_result_has_command():
 def test_run_context_defaults():
     ctx = RunContext(run_id="abc", prompt="fix pod")
     assert ctx.history == []
+    assert ctx.history_start_index == 0
     assert ctx.status == "running"
 
 
@@ -69,5 +70,11 @@ def test_run_context_skill_overrides_serializes_to_json():
     ctx = RunContext(run_id="r1", prompt="hello", skill_overrides={"abc": True})
     data = ctx.model_dump()
     assert data["skill_overrides"] == {"abc": True}
+
+
+def test_run_context_history_start_index_serializes_to_json():
+    ctx = RunContext(run_id="r1", prompt="hello", history_start_index=2)
+    data = ctx.model_dump()
+    assert data["history_start_index"] == 2
 
 
