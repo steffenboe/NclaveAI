@@ -329,7 +329,15 @@ export default function App() {
         />
       </div>
       {skillsModalOpen && (
-        <SkillsModal onClose={() => setSkillsModalOpen(false)} />
+        <SkillsModal onClose={() => {
+          setSkillsModalOpen(false)
+
+          if (tailRunId) {
+            loadConvSkills(tailRunId)
+          } else {
+            loadConvSkillsForNewChat()
+          }
+        }} />
       )}
     </>
   )
