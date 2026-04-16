@@ -187,6 +187,7 @@ def test_json_round_trip_preserves_all_fields(tmp_path):
 def client(tmp_path):
     repo = SkillRepository(tmp_path / "skills.json")
     app.state.skill_repo = repo
+    app.state.remote_skill_repo = None
     return TestClient(app)
 
 
