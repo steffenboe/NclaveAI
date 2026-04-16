@@ -193,6 +193,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
     history_start_index = 0
     seeded_overrides: dict[str, bool] = {}
     parent_run_id: str | None = None
+    history_snapshot: list = []
     if request.context_run_id is not None:
         with _runs_lock:
             parent_ctx = _runs.get(request.context_run_id)
