@@ -26,7 +26,7 @@ export default function CommandCard({ action }) {
       )}
 
       {hasOutput && (
-        <details className="cmd-output" open>
+        <details className="cmd-output" defaultOpen>
           <summary className="cmd-output-toggle">output</summary>
           {action.stdout && <pre>{action.stdout}</pre>}
           {action.stderr && <pre className="stderr">{action.stderr}</pre>}
