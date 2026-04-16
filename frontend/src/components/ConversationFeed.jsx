@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import CommandCard from './CommandCard'
 import ApprovalCard from './ApprovalCard'
 
-export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDeny, onSubmit }) {
+export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDeny, onSubmit, availableModels, selectedModel, onModelChange }) {
   const [prompt, setPrompt] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const feedRef = useRef(null)
@@ -62,6 +62,19 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
 
       <div className="input-area">
         <div className={'input-wrapper' + (isDisabled ? ' disabled' : '')}>
+          {availableModels.length > 0 && (
+            <select
+              className="model-selector"
+              aria-label="Model selector"
+              value={selectedModel || ''}
+              onChange={e => onModelChange(e.target.value)}
+              disabled={isDisabled}
+            >
+              {availableModels.map(model => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+          )}
           <input
             id="prompt-input"
             value={prompt}
