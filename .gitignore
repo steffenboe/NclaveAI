@@ -13,3 +13,6 @@ app/static/**
 
 .idea
 **/.DS_Store
+skills.json
+runs.json
+settings.json
