@@ -40,6 +40,8 @@ _STATIC_DIR = Path(__file__).parent / "static"
 # In-memory stores
 _runs: dict[str, RunContext] = {}
 _runs_lock = threading.Lock()
+_workflows: dict[str, AgentWorkflow] = {}
+_workflows_lock = threading.Lock()
 
 # Approval gate state
 _approval_required: bool = False
@@ -260,14 +262,20 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
             skill_repo, run_id=run_id, ctx=ctx, remote_skill_repo=remote_skill_repo,
             secrets_store=req.app.state.secrets_store,
         )
-        result = workflow.run(
-            prompt=request.prompt,
-            max_iterations=settings.max_iterations,
-            ctx=ctx,
-        )
-        with _runs_lock:
-            _runs[run_id] = result
-        run_repo.save(result)
+        with _workflows_lock:
+            _workflows[run_id] = workflow
+        try:
+            result = workflow.run(
+                prompt=request.prompt,
+                max_iterations=settings.max_iterations,
+                ctx=ctx,
+            )
+            with _runs_lock:
+                _runs[run_id] = result
+            run_repo.save(result)
+        finally:
+            with _workflows_lock:
+                _workflows.pop(run_id, None)
 
     thread = threading.Thread(target=_execute, daemon=True)
     thread.start()
@@ -578,6 +586,23 @@ def deny_command(run_id: str) -> dict:
         )
     approval.event.set()  # approved stays False
     return {"status": "denied"}
+
+
+@app.post("/api/agent/runs/{run_id}/abort", status_code=200)
+def abort_run(run_id: str) -> dict:
+    with _workflows_lock:
+        workflow = _workflows.get(run_id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=404, detail=f"No active workflow for run {run_id!r}"
+        )
+    workflow.abort()
+    # Also release any pending approval so the thread unblocks
+    with _pending_approvals_lock:
+        approval = _pending_approvals.pop(run_id, None)
+    if approval:
+        approval.event.set()
+    return {"status": "aborted"}
 
 
 # ── Skills ────────────────────────────────────────────────────────────────────

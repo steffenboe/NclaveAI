@@ -1,14 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
+import Markdown from 'react-markdown'
 import CommandCard from './CommandCard'
 import ApprovalCard from './ApprovalCard'
 
 export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDeny, onSubmit }) {
   const [prompt, setPrompt] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [aborting, setAborting] = useState(false)
   const feedRef = useRef(null)
 
   const tailStatus = tailRun?.status
-  const isDisabled = submitting || tailStatus === 'running' || tailStatus === 'waiting_approval'
+  const isRunning = tailStatus === 'running' || tailStatus === 'waiting_approval'
+  const isDisabled = submitting || isRunning
 
   let placeholder = 'Ask the agent something\u2026'
   if (tailStatus === 'waiting_approval') placeholder = 'Waiting for approval\u2026'
@@ -22,6 +25,11 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
     }
   }, [runs, chain])
 
+  // Reset aborting state when run finishes
+  useEffect(() => {
+    if (!isRunning) setAborting(false)
+  }, [isRunning])
+
   async function handleSubmit() {
     const p = prompt.trim()
     if (!p || isDisabled) return
@@ -34,6 +42,14 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
     } finally {
       setSubmitting(false)
     }
+  }
+
+  async function handleAbort() {
+    if (!tailRun || aborting) return
+    setAborting(true)
+    try {
+      await fetch(`/api/agent/runs/${tailRun.run_id}/abort`, { method: 'POST' })
+    } catch {}
   }
 
   return (
@@ -71,7 +87,13 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
               }
             }}
           />
-          <button id="run-btn" onClick={handleSubmit} disabled={isDisabled}>&#9654;</button>
+          {isRunning ? (
+            <button id="run-btn" className="abort-btn" onClick={handleAbort} disabled={aborting}>
+              {aborting ? '\u23F3' : '\u25A0'}
+            </button>
+          ) : (
+            <button id="run-btn" onClick={handleSubmit} disabled={isDisabled}>&#9654;</button>
+          )}
         </div>
       </div>
     </>
@@ -122,7 +144,7 @@ function ConversationTurn({ run, onApprove, onDeny }) {
         )}
 
         {run.status === 'done' && (
-          <div className="summary-block">{run.final_message || '(no response)'}</div>
+          <div className="summary-block"><Markdown>{run.final_message || '(no response)'}</Markdown></div>
         )}
 
         {['failed', 'policy_denied'].includes(run.status) && run.final_message && (

@@ -38,6 +38,11 @@ class AgentWorkflow:
         self._executor = executor
         self._approval_gate = approval_gate
         self._secrets_store = secrets_store
+        self._abort = False
+
+    def abort(self) -> None:
+        """Signal the workflow to stop after the current step."""
+        self._abort = True
 
     def run(
         self,
@@ -53,8 +58,21 @@ class AgentWorkflow:
         self._log("run_started", ctx, extra={"prompt": prompt})
 
         for iteration in range(max_iterations):
+            # Check abort flag
+            if self._abort:
+                ctx.status = "aborted"
+                ctx.final_message = "Run was aborted by user."
+                self._log("aborted", ctx)
+                break
+
             # PLAN (LLM step)
-            plan_output = self._planner.next_action(ctx)
+            try:
+                plan_output = self._planner.next_action(ctx)
+            except Exception as exc:
+                self._log("planner_error", ctx, extra={"error": str(exc)})
+                ctx.status = "failed"
+                ctx.final_message = f"LLM error: {exc}"
+                break
             self._log("plan", ctx, extra={
                 "iteration": iteration,
                 "status": plan_output.status,

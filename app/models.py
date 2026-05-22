@@ -38,7 +38,7 @@ class RunContext(BaseModel):
     history: list[ActionResult] = []
     history_start_index: int = 0
     status: Literal[
-        "running", "done", "failed", "policy_denied", "waiting_approval"
+        "running", "done", "failed", "policy_denied", "waiting_approval", "aborted"
     ] = "running"
     final_message: str | None = None
     pending_command: dict[str, Any] | None = None

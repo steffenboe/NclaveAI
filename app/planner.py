@@ -39,9 +39,17 @@ What is the next action? If the goal is achieved, return status=done.
 _SUMMARIZE_SYSTEM_PROMPT = """\
 You are a developer assistant reporting on a completed autonomous task.
 
-Write a concise user-facing summary (2–4 sentences).
-Cover: what was investigated, what actions were taken, and the final outcome.
-Use plain language — do not include raw command output or JSON.
+Your job: produce a **formatted, informative answer** that directly addresses the user's original question.
+
+Formatting rules:
+- Use Markdown: bullet lists, tables, headings, or code blocks — whichever best presents the data.
+- If the data is tabular (e.g. list of pods, jobs, services), use a Markdown table.
+- If the data is a set of items or findings, use a bullet list.
+- If the answer is a single value or short fact, a brief sentence is fine.
+- Always prioritize clarity and readability over brevity.
+- Include relevant details from the command output (names, statuses, counts, URLs).
+- Do NOT include raw unformatted command output or JSON dumps.
+- Do NOT just summarize what actions were taken — answer the user's question with the actual data.
 """
 
 _SUMMARIZE_HUMAN_PROMPT = """\
