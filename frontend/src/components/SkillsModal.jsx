@@ -17,7 +17,8 @@ export default function SkillsModal({ onClose }) {
   const [syncing, setSyncing] = useState(false)
   const [defaultModel, setDefaultModel] = useState('')
   const [availableModels, setAvailableModels] = useState([])
-  const [availableModelsInput, setAvailableModelsInput] = useState('')
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [fetchModelsError, setFetchModelsError] = useState('')
   // skillForm: null = hidden, {} = new skill, { skill } = editing existing
   const [skillForm, setSkillForm] = useState(null)
   const [form, setForm] = useState({ name: '', description: '', policy: '' })
@@ -35,6 +36,8 @@ export default function SkillsModal({ onClose }) {
   useEffect(() => {
     loadSettings()
     loadSkills()
+    loadSecrets()
+    fetchModelsFromApi()
   }, [])
 
   useEffect(() => {
@@ -69,10 +72,6 @@ export default function SkillsModal({ onClose }) {
         setTokenHelp('No token configured yet.')
       }
       if (data.default_model) setDefaultModel(data.default_model)
-      if (data.available_models) {
-        setAvailableModels(data.available_models)
-        setAvailableModelsInput(data.available_models.join(', '))
-      }
     } catch {}
   }
 
@@ -109,6 +108,7 @@ export default function SkillsModal({ onClose }) {
         throw new Error(err.detail || 'HTTP ' + res.status)
       }
       await loadSettings()
+      await fetchModelsFromApi()
       alert('LLM settings saved.')
     } catch (e) { alert('Failed to save LLM settings: ' + e.message) }
   }
@@ -138,23 +138,37 @@ export default function SkillsModal({ onClose }) {
     }
   }
 
+  async function fetchModelsFromApi() {
+    setFetchingModels(true)
+    setFetchModelsError('')
+    try {
+      const res = await fetch('/api/models')
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'HTTP ' + res.status)
+      }
+      const data = await res.json()
+      setAvailableModels(data.available_models)
+      setDefaultModel(prev => prev || data.default_model)
+    } catch (e) {
+      setFetchModelsError(e.message)
+    } finally {
+      setFetchingModels(false)
+    }
+  }
+
   async function saveModelSettings() {
-    const models = availableModelsInput.split(',').map(m => m.trim()).filter(m => m)
-    const trimmedDefaultModel = defaultModel.trim()
-    if (models.length === 0) { alert('At least one model is required.'); return }
-    if (!trimmedDefaultModel) { alert('Default model is required.'); return }
-    if (!models.includes(trimmedDefaultModel)) {
-      alert('Default model must be included in the available models list.')
+    if (availableModels.length === 0) { alert('No models loaded yet.'); return }
+    if (!defaultModel) { alert('Default model is required.'); return }
+    if (!availableModels.includes(defaultModel)) {
+      alert('Default model must be one of the available models.')
       return
     }
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          default_model: trimmedDefaultModel,
-          available_models: models,
-        }),
+        body: JSON.stringify({ default_model: defaultModel }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -167,7 +181,7 @@ export default function SkillsModal({ onClose }) {
 
   function showSkillForm(skill) {
     setSkillForm(skill !== undefined ? { skill } : {})
-    setForm({ name: skill?.name ?? '', description: skill?.description ?? '', policy: skill?.policy ?? '' })
+    setForm({ name: skill?.name ?? '', description: skill?.description ?? '', policy: skill?.policy ?? '', env: (skill?.env ?? []).join(', ') })
     setPolicyPopupOpen(false)
     setPolicyDesc('')
   }
@@ -177,24 +191,34 @@ export default function SkillsModal({ onClose }) {
     setPolicyPopupOpen(false)
   }
 
+  function _parseEnvList(raw) {
+    return raw.split(',').map(s => s.trim()).filter(Boolean)
+  }
+
   async function createSkill() {
     if (!form.name.trim() || !form.description.trim()) { alert('Name and description are required.'); return }
+    const envList = _parseEnvList(form.env)
     const res = await fetch('/api/skills', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: form.name.trim(), description: form.description.trim(), policy: form.policy.trim() || null }),
+      body: JSON.stringify({ name: form.name.trim(), description: form.description.trim(), policy: form.policy.trim() || null, env: envList.length ? envList : null }),
     })
-    if (!res.ok) { alert('Failed to create skill.'); return }
+    if (!res.ok) {
+      const err = await res.json().catch(() => null)
+      alert(err?.detail || 'Failed to create skill.')
+      return
+    }
     hideSkillForm()
     await loadSkills()
   }
 
   async function saveSkill(id) {
     if (!form.name.trim() || !form.description.trim()) { alert('Name and description are required.'); return }
+    const envList = _parseEnvList(form.env)
     const res = await fetch('/api/skills/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: form.name.trim(), description: form.description.trim(), policy: form.policy.trim() || null }),
+      body: JSON.stringify({ name: form.name.trim(), description: form.description.trim(), policy: form.policy.trim() || null, env: envList }),
     })
     if (!res.ok) { alert('Failed to save skill.'); return }
     hideSkillForm()
@@ -229,6 +253,33 @@ export default function SkillsModal({ onClose }) {
       await loadSkills()
     } catch (e) { alert('Sync failed: ' + e.message) }
     finally { setSyncing(false) }
+  }
+
+  async function loadSecrets() {
+    try {
+      const res = await fetch('/api/secrets')
+      if (res.ok) setSecrets(await res.json())
+    } catch {}
+  }
+
+  async function addSecret() {
+    if (!newSecretName.trim() || !newSecretValue.trim()) { alert('Name and value are required.'); return }
+    const res = await fetch('/api/secrets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newSecretName.trim(), value: newSecretValue.trim() }),
+    })
+    if (!res.ok) { alert('Failed to add secret.'); return }
+    setNewSecretName('')
+    setNewSecretValue('')
+    await loadSecrets()
+  }
+
+  async function deleteSecret(name) {
+    if (!confirm(`Delete secret "${name}"?`)) return
+    const res = await fetch('/api/secrets/' + encodeURIComponent(name), { method: 'DELETE' })
+    if (!res.ok) { alert('Failed to delete secret.'); return }
+    await loadSecrets()
   }
 
   async function generatePolicy() {
@@ -344,25 +395,34 @@ export default function SkillsModal({ onClose }) {
           {/* Model configuration */}
           <div className="settings-section">
             <div className="settings-field">
-              <div className="settings-field-title">Available models (comma-separated)</div>
-              <input
-                type="text"
-                value={availableModelsInput}
-                onChange={e => setAvailableModelsInput(e.target.value)}
-                placeholder="gpt-4.1, gpt-4o, claude-3-opus"
-              />
+              <div className="settings-field-title">Available models</div>
+              {fetchingModels && <div className="settings-help">Fetching models…</div>}
+              {fetchModelsError && (
+                <div className="settings-error">{fetchModelsError}</div>
+              )}
+              {!fetchingModels && availableModels.length > 0 && (
+                <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none', fontSize: '0.85rem', color: 'var(--text-muted, #aaa)' }}>
+                  {availableModels.map(m => <li key={m}>{m}</li>)}
+                </ul>
+              )}
             </div>
             <div className="settings-field">
               <div className="settings-field-title">Default model</div>
-              <input
-                type="text"
-                value={defaultModel}
-                onChange={e => setDefaultModel(e.target.value)}
-                placeholder="gpt-4.1"
-              />
+              {availableModels.length > 0 ? (
+                <select
+                  value={defaultModel}
+                  onChange={e => setDefaultModel(e.target.value)}
+                >
+                  {availableModels.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="settings-help">Fetch models from the API to select a default.</div>
+              )}
             </div>
             <div className="form-actions" style={{ marginTop: 0 }}>
-              <button className="btn-sm btn-secondary" onClick={saveModelSettings}>
+              <button className="btn-sm btn-secondary" onClick={saveModelSettings} disabled={availableModels.length === 0}>
                 Save model settings
               </button>
             </div>
@@ -407,6 +467,13 @@ export default function SkillsModal({ onClose }) {
                 value={form.description}
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                 placeholder="Describe how the agent should use this tool\u2026"
+              />
+              <label>Environment variables (comma-separated names injected at runtime)</label>
+              <input
+                type="text"
+                value={form.env}
+                onChange={e => setForm(p => ({ ...p, env: e.target.value }))}
+                placeholder="e.g. API_TOKEN, AUTH_HEADER"
               />
               <label>Policy (Rego rules \u2014 leave empty to disable)</label>
               <textarea

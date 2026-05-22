@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 .env
 runs.json
+secrets.json
 .pytest_cache/
 *.egg-info/
 dist/

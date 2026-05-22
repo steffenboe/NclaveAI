@@ -36,9 +36,6 @@ export default function App() {
   const [selectedRootId, setSelectedRootId] = useState(null)
   const [skillsModalOpen, setSkillsModalOpen] = useState(false)
   const [convSkillsData, setConvSkillsData] = useState([])
-  const [availableModels, setAvailableModels] = useState([])
-  const [defaultModel, setDefaultModel] = useState(null)
-  const [selectedModel, setSelectedModel] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
 
@@ -142,49 +139,25 @@ export default function App() {
             current = next
           }
           loadConvSkills(tailId)
-          // Load model for selected conversation
-          if (newRuns[tailId]?.llm_model) {
-            setSelectedModel(newRuns[tailId].llm_model)
-          }
         } else {
           loadConvSkillsForNewChat()
         }
       } catch {}
     }
-    async function loadModels() {
-      try {
-        const res = await fetch('/api/models')
-        if (res.ok) {
-          const data = await res.json()
-          setAvailableModels(data.available_models)
-          setDefaultModel(data.default_model)
-          setSelectedModel(current => current ?? data.default_model)
-        }
-      } catch {}
-    }
     loadAll()
-    loadModels()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const newChat = useCallback(() => {
     setSelectedRootId(null)
-    setSelectedModel(defaultModel)
     loadConvSkillsForNewChat()
-  }, [loadConvSkillsForNewChat, defaultModel])
+  }, [loadConvSkillsForNewChat])
 
   const selectConversation = useCallback((rootId) => {
     setSelectedRootId(rootId)
     const chain = getChain(runsRef.current, runOrderRef.current, rootId)
     const tailId = chain[chain.length - 1]
     loadConvSkills(tailId)
-    // Load model for the selected conversation
-    const tailRun = runsRef.current[tailId]
-    if (tailRun?.llm_model) {
-      setSelectedModel(tailRun.llm_model)
-    } else {
-      setSelectedModel(defaultModel)
-    }
-  }, [loadConvSkills, defaultModel])
+  }, [loadConvSkills])
 
   const deleteConversation = useCallback(async (rootId) => {
     try {
@@ -235,7 +208,6 @@ export default function App() {
 
     const body = { prompt }
     if (contextRunId) body.context_run_id = contextRunId
-    if (selectedModel) body.llm_model = selectedModel
 
     const res = await fetch('/api/agent/run', {
       method: 'POST',
@@ -252,16 +224,16 @@ export default function App() {
       history: [],
       history_start_index: inheritedHistoryLength,
       parent_run_id: contextRunId,
-      llm_model: selectedModel,
     })
     if (!contextRunId) setSelectedRootId(data.run_id)
 
     await applyPendingOverrides(data.run_id)
     pollRun(data.run_id)
     loadConvSkills(data.run_id)
-  }, [selectedRootId, selectedModel, upsertRun, applyPendingOverrides, pollRun, loadConvSkills])
+  }, [selectedRootId, upsertRun, applyPendingOverrides, pollRun, loadConvSkills])
 
   const toggleConvSkill = useCallback(async (tailRunId, skill) => {
+    if (skill.source === 'remote') return
     if (!tailRunId) {
       const next = !skill.effective_enabled
       pendingOverridesRef.current[skill.id] = next
@@ -318,9 +290,6 @@ export default function App() {
           onApprove={handleApprove}
           onDeny={handleDeny}
           onSubmit={submitRun}
-          availableModels={availableModels}
-          selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
         />
         <ConvSkillsBar
           tailRunId={tailRunId}

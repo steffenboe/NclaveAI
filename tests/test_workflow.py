@@ -408,7 +408,7 @@ def test_workflow_passes_skill_overrides_to_policy(mock_planner, mock_executor, 
         PlannerOutput(status="action", command=Command(argv=["kubectl", "get", "pods"], rationale="r"), summary="s"),
         PlannerOutput(status="done", summary="all done"),
     ]
-    mock_policy.evaluate.return_value = (True, None, "kubectl-skill")
+    mock_policy.evaluate.return_value = (True, None, None)
     mock_executor.run.return_value = ActionResult(
         command=Command(argv=["kubectl", "get", "pods"], rationale="r"),
         allowed=True, stdout="", stderr="", exit_code=0,
@@ -459,6 +459,109 @@ def test_globally_enabled_skill_blocked_by_conversation_override(mock_planner, m
     wf = AgentWorkflow(planner=mock_planner, policy=policy, executor=mock_executor)
     result = wf.run(prompt="check pods", ctx=ctx)
 
-    # executor.rego has deny-all, so with skill disabled, command must be blocked
+    # No skill allows this command (skill disabled by override), so it is denied by default
     assert result.status == "policy_denied"
     mock_executor.run.assert_not_called()
+
+
+# ── Secrets store integration ─────────────────────────────────────────────────
+
+def test_workflow_injects_secrets_from_store_not_os_environ(mock_planner, mock_executor):
+    """Secrets must come from SecretsStore, not os.environ."""
+    from datetime import datetime, timezone
+    from app.policy import PolicyEvaluator
+    from app.secrets_store import SecretsStore
+    from app.skills import Skill
+    from pathlib import Path
+    import tempfile, os
+
+    # Create a skill with env var
+    skill = Skill(
+        id="curl-skill",
+        name="curl",
+        description="HTTP client",
+        enabled=True,
+        policy='allow { input.argv[0] == "curl" }',
+        env=["API_TOKEN"],
+        created_at=datetime.now(timezone.utc),
+    )
+    policy = PolicyEvaluator(skills=[skill])
+
+    # Set up secrets store with the token
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        f.write('{"API_TOKEN": "secret_from_store"}')
+        secrets_path = Path(f.name)
+    secrets_store = SecretsStore(secrets_path)
+
+    # Ensure the token is NOT in os.environ
+    os.environ.pop("API_TOKEN", None)
+
+    mock_planner.next_action.side_effect = [
+        PlannerOutput(
+            status="action",
+            command=Command(argv=["curl", "-H", "Authorization: ${API_TOKEN}", "https://api.example.com"], rationale="test"),
+            summary="calling API",
+        ),
+        PlannerOutput(status="done", summary="done"),
+    ]
+    mock_executor.run.return_value = ActionResult(
+        command=Command(argv=["curl", "-H", "Authorization: ${API_TOKEN}", "https://api.example.com"], rationale="test"),
+        allowed=True, stdout="response", stderr="", exit_code=0,
+    )
+
+    wf = AgentWorkflow(
+        planner=mock_planner, policy=policy, executor=mock_executor,
+        secrets_store=secrets_store,
+    )
+    ctx = RunContext(run_id="r-secrets", prompt="call api")
+    wf.run(prompt="call api", ctx=ctx)
+
+    # Executor must have been called with env containing the secret
+    call_kwargs = mock_executor.run.call_args
+    env_arg = call_kwargs[1].get("env") if call_kwargs[1] else call_kwargs[0][1] if len(call_kwargs[0]) > 1 else None
+    assert env_arg == {"API_TOKEN": "secret_from_store"}
+
+    secrets_path.unlink()
+
+
+def test_workflow_no_secrets_store_passes_no_env(mock_planner, mock_executor):
+    """Without a secrets store, no env is passed to executor."""
+    from datetime import datetime, timezone
+    from app.policy import PolicyEvaluator
+    from app.skills import Skill
+
+    skill = Skill(
+        id="curl-skill",
+        name="curl",
+        description="HTTP client",
+        enabled=True,
+        policy='allow { input.argv[0] == "curl" }',
+        env=["API_TOKEN"],
+        created_at=datetime.now(timezone.utc),
+    )
+    policy = PolicyEvaluator(skills=[skill])
+
+    mock_planner.next_action.side_effect = [
+        PlannerOutput(
+            status="action",
+            command=Command(argv=["curl", "https://api.example.com"], rationale="test"),
+            summary="calling API",
+        ),
+        PlannerOutput(status="done", summary="done"),
+    ]
+    mock_executor.run.return_value = ActionResult(
+        command=Command(argv=["curl", "https://api.example.com"], rationale="test"),
+        allowed=True, stdout="ok", stderr="", exit_code=0,
+    )
+
+    wf = AgentWorkflow(
+        planner=mock_planner, policy=policy, executor=mock_executor,
+        secrets_store=None,  # No secrets store
+    )
+    ctx = RunContext(run_id="r-no-secrets", prompt="call api")
+    wf.run(prompt="call api", ctx=ctx)
+
+    # Executor called with env=None
+    call_kwargs = mock_executor.run.call_args
+    env_arg = call_kwargs[1].get("env") if call_kwargs[1] else None
+    assert env_arg is None
