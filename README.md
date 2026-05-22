@@ -235,7 +235,7 @@ description: |
   Jenkins REST API access (read-only).
   Environment variables available: ${JENKINS_TOKEN}.
   Use ${VAR} syntax in arguments — values are injected at runtime.
-  Use --user exsboern:${JENKINS_TOKEN} for authentication.
+  Use --user agent:${JENKINS_TOKEN} for authentication.
 enabled: true
 env:
   - JENKINS_TOKEN
