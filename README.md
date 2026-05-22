@@ -243,7 +243,7 @@ policy: |
   argv_has(v) { input.argv[_] == v }
   url_allowed {
     val := input.argv[_]
-    contains(val, "devtools.mlp.de")
+    contains(val, "my.jenkins.com")
     not url_blocked(val)
   }
   url_blocked(val) { contains(val, "/credentials") }
@@ -267,7 +267,7 @@ policy: |
 |---|---|
 | **LLM generates** | `["curl", "-k", "-X", "GET", "--user", "agent:${JENKINS_TOKEN}", "https://corp.jenkins.com/api/json"]` |
 | **Stored in history** | Same as above (placeholder only) |
-| **Subprocess receives** | `curl -k -X GET --user exsboern:actual-secret-value https://devtools.mlp.de/jenkins/api/json` |
+| **Subprocess receives** | `curl -k -X GET --user username:actual-secret-value https://copr.jenkins.com/api/json` |
 
 The actual secret value exists only in the subprocess environment — never in LLM context, conversation history, or logs.
 
