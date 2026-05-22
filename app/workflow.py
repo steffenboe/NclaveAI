@@ -9,6 +9,7 @@ from app.executor import CommandExecutor
 from app.models import Command, RunContext  # Command needed for approval_gate type annotation
 from app.planner import Planner
 from app.policy import PolicyEvaluator
+from app.secrets_store import SecretsStore
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +31,13 @@ class AgentWorkflow:
         policy: PolicyEvaluator,
         executor: CommandExecutor,
         approval_gate: Callable[[Command], bool] | None = None,
+        secrets_store: SecretsStore | None = None,
     ) -> None:
         self._planner = planner
         self._policy = policy
         self._executor = executor
         self._approval_gate = approval_gate
+        self._secrets_store = secrets_store
 
     def run(
         self,
@@ -66,7 +69,7 @@ class AgentWorkflow:
             command = plan_output.command  # guaranteed non-None when status == "action"
 
             # VALIDATE (OPA step)
-            allowed, reason, skill_name = self._policy.evaluate(command, skill_overrides=ctx.skill_overrides)
+            allowed, reason, skill = self._policy.evaluate(command, skill_overrides=ctx.skill_overrides)
             if not allowed:
                 self._log("policy_denied", ctx, extra={
                     "argv": command.argv,
@@ -83,9 +86,26 @@ class AgentWorkflow:
                 ctx.final_message = f"Run stopped: '{ ' '.join(command.argv) }' was not approved."
                 break
 
+            # Resolve per-skill env vars from secrets store (NOT from process env)
+            skill_env: dict[str, str] | None = None
+            if skill and skill.env and self._secrets_store:
+                skill_env = self._secrets_store.resolve(skill.env) or None
+                logger.info(
+                    "Secrets resolution for skill %r: requested=%s, resolved_keys=%s",
+                    skill.name,
+                    skill.env,
+                    list(skill_env.keys()) if skill_env else [],
+                )
+            elif skill and skill.env:
+                logger.warning(
+                    "Skill %r declares env=%s but no secrets store is configured",
+                    skill.name,
+                    skill.env,
+                )
+
             # EXECUTE (subprocess step)
-            result = self._executor.run(command)
-            result.skill_name = skill_name
+            result = self._executor.run(command, env=skill_env)
+            result.skill_name = skill.name if skill else None
             ctx.history.append(result)
             self._log("action_executed", ctx, extra={
                 "argv": command.argv,

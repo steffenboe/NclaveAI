@@ -26,7 +26,7 @@ class ActionResult(BaseModel):
     command: Command
     allowed: bool
     policy_reason: str | None = None
-    skill_name: str | None = None  # None = global policy fallback or denied
+    skill_name: str | None = None  # None = denied (no skill claimed the command)
     stdout: str | None = None
     stderr: str | None = None
     exit_code: int | None = None

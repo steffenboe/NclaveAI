@@ -180,7 +180,7 @@ def test_get_run_skills_includes_remote_skills(client_with_remote_skill):
     assert data[0]["effective_enabled"] is True
 
 
-def test_patch_run_skill_sets_override_for_remote_skill(client_with_remote_skill):
+def test_patch_run_skill_rejects_override_for_remote_skill(client_with_remote_skill):
     ctx = RunContext(run_id="remote-run", prompt="hello")
     with _runs_lock:
         _runs[ctx.run_id] = ctx
@@ -189,10 +189,23 @@ def test_patch_run_skill_sets_override_for_remote_skill(client_with_remote_skill
         "/api/agent/runs/remote-run/skills/remote-skill-1",
         json={"enabled": False},
     )
-    assert res.status_code == 200
-    assert res.json()["source"] == "remote"
-    assert res.json()["enabled"] is True
-    assert res.json()["effective_enabled"] is False
+    assert res.status_code == 403
+    assert "cannot be deactivated" in res.json()["detail"]
 
+    # Override must NOT have been stored
     with _runs_lock:
-        assert _runs["remote-run"].skill_overrides["remote-skill-1"] is False
+        assert "remote-skill-1" not in _runs["remote-run"].skill_overrides
+
+
+def test_remote_skill_effective_enabled_always_true(client_with_remote_skill):
+    """Remote skills report effective_enabled=True even if stale overrides exist."""
+    ctx = RunContext(run_id="remote-run", prompt="hello")
+    # Simulate a stale override (e.g. from before this enforcement was added)
+    ctx.skill_overrides["remote-skill-1"] = False
+    with _runs_lock:
+        _runs[ctx.run_id] = ctx
+
+    res = client_with_remote_skill.get("/api/agent/runs/remote-run/skills")
+    assert res.status_code == 200
+    remote_item = next(s for s in res.json() if s["id"] == "remote-skill-1")
+    assert remote_item["effective_enabled"] is True

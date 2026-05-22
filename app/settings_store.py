@@ -13,7 +13,8 @@ class AppSettings(BaseModel):
     skills_repo_url: str | None = None
     skills_repo_branch: str = "main"
     default_model: str | None = None
-    available_models: list[str] = []
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
 
 
 class AppSettingsRepository:

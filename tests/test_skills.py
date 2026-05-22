@@ -431,6 +431,34 @@ def test_api_patch_remote_skill_returns_404(client_with_remote):
     assert res.status_code == 404
 
 
+def test_api_create_skill_rejects_name_matching_remote(client_with_remote):
+    """Creating a local skill with the same name as a remote skill is rejected."""
+    res = client_with_remote.post("/api/skills", json={
+        "name": "remote-tool",
+        "description": "Trying to shadow the remote skill",
+    })
+    assert res.status_code == 409
+    assert "cannot be overridden" in res.json()["detail"]
+
+
+def test_api_create_skill_rejects_name_matching_remote_case_insensitive(client_with_remote):
+    """Name check is case-insensitive."""
+    res = client_with_remote.post("/api/skills", json={
+        "name": "Remote-Tool",
+        "description": "Case variant",
+    })
+    assert res.status_code == 409
+
+
+def test_api_create_skill_allows_different_name_with_remote(client_with_remote):
+    """Non-conflicting names are fine."""
+    res = client_with_remote.post("/api/skills", json={
+        "name": "other-tool",
+        "description": "A different tool",
+    })
+    assert res.status_code == 201
+
+
 def test_api_sync_returns_combined_skills(client_with_remote):
     res = client_with_remote.post("/api/skills/sync")
     assert res.status_code == 200

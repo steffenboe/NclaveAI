@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import cast
+import json
+import re
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -96,6 +97,43 @@ def _format_history(history: list[ActionResult]) -> str:
     return "\n".join(lines)
 
 
+def _extract_json(text: str) -> str:
+    """Extract the first complete JSON object from raw model output.
+
+    Handles leading/trailing prose and markdown code fences.
+    """
+    # Strip markdown fences first
+    text = re.sub(r"```[^\n]*\n", "", text)
+    text = text.replace("```", "")
+
+    # Find the outermost { ... } using brace counting
+    start = text.find("{")
+    if start == -1:
+        raise ValueError(f"No JSON object found in model output: {text!r}")
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    raise ValueError(f"Unbalanced braces in model output: {text!r}")
+
+
 class Planner:
     def __init__(
         self,
@@ -114,12 +152,11 @@ class Planner:
             model=llm_model or settings.llm_model,
             temperature=0,
         )
-        structured_llm = llm.with_structured_output(PlannerOutput)
         prompt = ChatPromptTemplate.from_messages([
             ("system", "{system_prompt}"),
             ("human", _HUMAN_PROMPT),
         ])
-        self._chain = prompt | structured_llm
+        self._chain = prompt | llm | StrOutputParser()
 
         summarize_prompt = ChatPromptTemplate.from_messages([
             ("system", _SUMMARIZE_SYSTEM_PROMPT),
@@ -145,9 +182,15 @@ class Planner:
                 "if a command is denied you will see an error in the action history; try an alternative.\n\n"
                 + _RULES
             )
-        tools_section = "\n\n".join(
-            f"[{s.name}]\n{s.description}" for s in enabled
-        )
+
+        def _skill_block(s) -> str:
+            block = f"[{s.name}]\n{s.description}"
+            if s.env:
+                env_refs = ", ".join(f"${{{v}}}" for v in s.env)
+                block += f"\nEnvironment variables available: {env_refs}. Use ${{VAR}} syntax in arguments — values are injected at runtime."
+            return block
+
+        tools_section = "\n\n".join(_skill_block(s) for s in enabled)
         return (
             "You are an autonomous developer companion agent.\n\n"
             f"The following skills are pre-configured and available:\n\n{tools_section}\n\n"
@@ -159,11 +202,15 @@ class Planner:
         )
 
     def next_action(self, ctx: RunContext) -> PlannerOutput:
-        return cast(PlannerOutput, self._chain.invoke({
+        raw = self._chain.invoke({
             "system_prompt": self._build_system_prompt(),
             "prompt": ctx.prompt,
             "history_str": _format_history(ctx.history),
-        }))
+        })
+        # Tests may inject a PlannerOutput directly via a mock chain
+        if isinstance(raw, PlannerOutput):
+            return raw
+        return PlannerOutput.model_validate(json.loads(_extract_json(raw)))
 
     def summarize(self, ctx: RunContext) -> str:
         return self._summarize_chain.invoke({

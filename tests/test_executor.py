@@ -56,3 +56,60 @@ def test_executor_takes_no_constructor_args():
     # CommandExecutor() must work without namespace or any other argument
     executor = CommandExecutor()
     assert executor is not None
+
+
+# ── env injection + ${VAR} resolution tests ───────────────────────────────────
+
+
+@patch("app.executor.subprocess.run")
+def test_executor_resolves_env_vars_in_argv(mock_run):
+    mock_run.return_value = _mock_proc(stdout="ok")
+    env = {"API_TOKEN": "Bearer secret123"}
+    result = CommandExecutor().run(
+        _make_command(["curl", "-H", "Authorization: ${API_TOKEN}", "https://api.example.com"]),
+        env=env,
+    )
+    # The actual subprocess should receive the resolved argv
+    called_argv = mock_run.call_args[0][0]
+    assert called_argv == ["curl", "-H", "Authorization: Bearer secret123", "https://api.example.com"]
+    assert result.exit_code == 0
+
+
+@patch("app.executor.subprocess.run")
+def test_executor_leaves_unknown_vars_unresolved(mock_run):
+    mock_run.return_value = _mock_proc(stdout="ok")
+    env = {"KNOWN": "value"}
+    CommandExecutor().run(
+        _make_command(["echo", "${KNOWN}", "${UNKNOWN}"]),
+        env=env,
+    )
+    called_argv = mock_run.call_args[0][0]
+    assert called_argv == ["echo", "value", "${UNKNOWN}"]
+
+
+@patch("app.executor.subprocess.run")
+def test_executor_passes_env_to_subprocess(mock_run):
+    mock_run.return_value = _mock_proc(stdout="ok")
+    env = {"API_TOKEN": "secret"}
+    CommandExecutor().run(_make_command(["curl", "https://example.com"]), env=env)
+    call_kwargs = mock_run.call_args[1]
+    assert "env" in call_kwargs
+    assert call_kwargs["env"]["API_TOKEN"] == "secret"
+
+
+@patch("app.executor.subprocess.run")
+def test_executor_no_env_does_not_pass_env_to_subprocess(mock_run):
+    mock_run.return_value = _mock_proc(stdout="ok")
+    CommandExecutor().run(_make_command(["ls"]))
+    call_kwargs = mock_run.call_args[1]
+    assert call_kwargs.get("env") is None
+
+
+@patch("app.executor.subprocess.run")
+def test_executor_command_model_retains_original_argv(mock_run):
+    """The ActionResult.command should keep the original argv with placeholders."""
+    mock_run.return_value = _mock_proc(stdout="ok")
+    cmd = _make_command(["curl", "-H", "${TOKEN}", "https://api.example.com"])
+    result = CommandExecutor().run(cmd, env={"TOKEN": "secret"})
+    # Original command in result still has placeholder
+    assert result.command.argv == ["curl", "-H", "${TOKEN}", "https://api.example.com"]

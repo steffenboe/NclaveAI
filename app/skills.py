@@ -20,6 +20,7 @@ class Skill(BaseModel):
     description: str
     enabled: bool = True
     policy: str | None = None   # rego rule bodies; None = no OPA authorization
+    env: list[str] = []         # env var names forwarded to subprocess at execution time
     created_at: datetime
     source: str = "local"       # "local" | "remote" — not persisted in skills.json
 
@@ -70,13 +71,14 @@ class SkillRepository:
                 return i
         raise KeyError(id)
 
-    def create(self, name: str, description: str, enabled: bool = True, policy: str | None = None) -> Skill:
+    def create(self, name: str, description: str, enabled: bool = True, policy: str | None = None, env: list[str] | None = None) -> Skill:
         skill = Skill(
             id=str(uuid.uuid4()),
             name=name,
             description=description,
             enabled=enabled,
             policy=policy,
+            env=env or [],
             created_at=datetime.now(timezone.utc),
         )
         self._skills.append(skill)
@@ -91,6 +93,7 @@ class SkillRepository:
         description: str | None = None,
         enabled: bool | None = None,
         policy: object = _UNSET,
+        env: object = _UNSET,
     ) -> Skill:
         idx = self._find_index(id)  # raises KeyError if not found
         updates: dict = {}
@@ -102,6 +105,8 @@ class SkillRepository:
             updates["enabled"] = enabled
         if policy is not _UNSET:       # None is a valid value — clears the policy
             updates["policy"] = policy
+        if env is not _UNSET:
+            updates["env"] = env
         updated = self._skills[idx].model_copy(update=updates)
         self._skills[idx] = updated
         self._save()
@@ -176,6 +181,7 @@ class RemoteSkillRepository:
                         description=str(description),
                         enabled=bool(data.get("enabled", True)),
                         policy=data.get("policy") or None,
+                        env=data.get("env") or [],
                         created_at=datetime.now(timezone.utc),
                         source="remote",
                     )
