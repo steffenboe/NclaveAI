@@ -16,3 +16,4 @@ app/static/**
 **/.DS_Store
 skills.json
 settings.json
+users.json

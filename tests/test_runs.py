@@ -160,6 +160,37 @@ def test_terminal_runs_survive_restart(tmp_path):
     assert ctx.final_message == "great"
 
 
+# ── Owner filtering ───────────────────────────────────────────────────────────
+
+def _make_owned_run(run_id: str, owner_id: str) -> RunContext:
+    return RunContext(run_id=run_id, prompt="test", status="done", owner_id=owner_id)
+
+
+def test_list_filters_by_owner_id(repo):
+    repo.save(_make_owned_run("r1", "user-a"))
+    repo.save(_make_owned_run("r2", "user-b"))
+    results = repo.list(owner_id="user-a")
+    assert [r.run_id for r in results] == ["r1"]
+
+
+def test_list_without_owner_id_returns_all(repo):
+    repo.save(_make_owned_run("r1", "user-a"))
+    repo.save(_make_owned_run("r2", "user-b"))
+    assert len(repo.list()) == 2
+
+
+def test_get_raises_for_wrong_owner(repo):
+    repo.save(_make_owned_run("r1", "user-a"))
+    with pytest.raises(KeyError):
+        repo.get("r1", owner_id="user-b")
+
+
+def test_get_succeeds_for_correct_owner(repo):
+    repo.save(_make_owned_run("r1", "user-a"))
+    ctx = repo.get("r1", owner_id="user-a")
+    assert ctx.run_id == "r1"
+
+
 def test_all_as_dict_returns_copies(repo):
     ctx = _make_run()
     repo.save(ctx)

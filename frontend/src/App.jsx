@@ -3,6 +3,11 @@ import Sidebar from './components/Sidebar'
 import ConversationFeed from './components/ConversationFeed'
 import ConvSkillsBar from './components/ConvSkillsBar'
 import SkillsModal from './components/SkillsModal'
+import UsersModal from './components/UsersModal'
+import { useAuth } from './AuthContext'
+import Login from './Login'
+// Shadows the global fetch in this module so all API calls get 401 interception
+import { apiFetch as fetch } from './apiFetch'
 
 // ── Pure helpers ───────────────────────────────────────
 
@@ -30,11 +35,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 // ── App ────────────────────────────────────────────────
 
-export default function App() {
+// All authenticated UI lives here so hooks are never called conditionally.
+function MainApp({ user, logout }) {
   const [runs, setRuns] = useState({})
   const [runOrder, setRunOrder] = useState([])
   const [selectedRootId, setSelectedRootId] = useState(null)
   const [skillsModalOpen, setSkillsModalOpen] = useState(false)
+  const [usersModalOpen, setUsersModalOpen] = useState(false)
   const [convSkillsData, setConvSkillsData] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
@@ -281,6 +288,9 @@ export default function App() {
         searchQuery={searchQuery}
         searchResults={searchResults}
         onSearch={setSearchQuery}
+        user={user}
+        onLogout={logout}
+        onOpenUsersModal={user?.role === 'admin' ? () => setUsersModalOpen(true) : null}
       />
       <div className="main">
         <ConversationFeed
@@ -308,6 +318,17 @@ export default function App() {
           }
         }} />
       )}
+      {user?.role === 'admin' && usersModalOpen && (
+        <UsersModal onClose={() => setUsersModalOpen(false)} />
+      )}
     </>
   )
+}
+
+// Auth gate — renders loading or Login before the full app mounts.
+export default function App() {
+  const { user, logout } = useAuth()
+  if (user === undefined) return <div className="auth-loading">Authenticating…</div>
+  if (user === null) return <Login />
+  return <MainApp user={user} logout={logout} />
 }

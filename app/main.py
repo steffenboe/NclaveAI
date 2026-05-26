@@ -10,22 +10,24 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
 from app.config import settings
 from app.executor import CommandExecutor
-from app.models import Command, RunContext
+from app.models import Command, RunContext, User, UserPublic
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 from app.runs import RunRepository, _match_hint, _run_matches
 from app.secrets_store import SecretsStore
 from app.settings_store import AppSettings, AppSettingsRepository
 from app.skills import RemoteSkillRepository, SkillRepository
+from app.users import UserRepository
 from app.workflow import AgentWorkflow
 
 logging.basicConfig(
@@ -121,6 +123,17 @@ async def lifespan(app: FastAPI):
     app.state.secrets_store = SecretsStore(settings.secrets_file)
     with _runs_lock:
         _runs.update(run_repo.all_as_dict())
+
+    user_repo = UserRepository(settings.users_file)
+    app.state.user_repo = user_repo
+    if user_repo.count() == 0 and settings.admin_password:
+        user_repo.create(
+            username=settings.admin_username,
+            hashed_password=hash_password(settings.admin_password),
+            role="admin",
+        )
+        logger.info("Bootstrapped admin user %r", settings.admin_username)
+
     yield
 
 
@@ -140,6 +153,7 @@ def _build_workflow(
     ctx: RunContext | None = None,
     remote_skill_repo=None,
     secrets_store: SecretsStore | None = None,
+    user_require_approval: bool = False,
 ) -> AgentWorkflow:
     local_skills = skill_repo.list()
     remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
@@ -150,7 +164,7 @@ def _build_workflow(
     llm_model = settings.llm_model
     if run_id is not None and ctx is not None:
         with _settings_lock:
-            need_approval = _approval_required
+            need_approval = _approval_required or user_require_approval
             llm_base_url = _llm_base_url
             llm_api_key = _llm_api_key
         if need_approval:
@@ -173,7 +187,166 @@ def _build_workflow(
     )
 
 
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    role: Literal["admin", "user"] = "user"
+
+
+class UserPatchRequest(BaseModel):
+    username: str | None = None
+    role: Literal["admin", "user"] | None = None
+    require_approval: bool | None = None
+
+
+@app.post("/api/auth/login")
+def login(body: LoginRequest, response: Response, request: Request) -> UserPublic:
+    user_repo: UserRepository = request.app.state.user_repo
+    user = user_repo.get_by_username(body.username)
+    if user is None or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_access_token(subject=user.user_id, role=user.role)
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+        max_age=8 * 60 * 60,
+    )
+    return UserPublic(
+        user_id=user.user_id,
+        username=user.username,
+        role=user.role,
+        created_at=user.created_at,
+        require_approval=user.require_approval,
+    )
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response, current_user: User = Depends(get_current_user)) -> dict:
+    response.delete_cookie("access_token")
+    return {"status": "logged out"}
+
+
+@app.get("/api/auth/me", response_model=UserPublic)
+def me(current_user: User = Depends(get_current_user)) -> UserPublic:
+    return UserPublic(
+        user_id=current_user.user_id,
+        username=current_user.username,
+        role=current_user.role,
+        created_at=current_user.created_at,
+        require_approval=current_user.require_approval,
+    )
+
+
+@app.post("/api/auth/change-password")
+def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    if not verify_password(body.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    user_repo: UserRepository = request.app.state.user_repo
+    user_repo.update(current_user.user_id, hashed_password=hash_password(body.new_password))
+    return {"status": "password changed"}
+
+
+# ── Users ───────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/users", response_model=list[UserPublic])
+def list_users(request: Request, current_user: User = Depends(require_admin)) -> list[UserPublic]:
+    user_repo: UserRepository = request.app.state.user_repo
+    return [
+        UserPublic(user_id=u.user_id, username=u.username, role=u.role, created_at=u.created_at, require_approval=u.require_approval)
+        for u in user_repo.list()
+    ]
+
+
+@app.post("/api/users", status_code=201, response_model=UserPublic)
+def create_user(
+    body: UserCreateRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> UserPublic:
+    user_repo: UserRepository = request.app.state.user_repo
+    if user_repo.get_by_username(body.username) is not None:
+        raise HTTPException(status_code=409, detail=f"Username {body.username!r} already taken")
+    user = user_repo.create(
+        username=body.username,
+        hashed_password=hash_password(body.password),
+        role=body.role,
+    )
+    return UserPublic(user_id=user.user_id, username=user.username, role=user.role, created_at=user.created_at, require_approval=user.require_approval)
+
+
+@app.patch("/api/users/{user_id}", response_model=UserPublic)
+def patch_user(
+    user_id: str,
+    body: UserPatchRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> UserPublic:
+    user_repo: UserRepository = request.app.state.user_repo
+    user = user_repo.get(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
+    if current_user.role != "admin" and current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Cannot modify another user's account")
+    if body.role is not None and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Cannot change your own role")
+    kwargs: dict[str, object] = {}
+    if body.username is not None:
+        kwargs["username"] = body.username
+    if body.role is not None:
+        kwargs["role"] = body.role
+    if body.require_approval is not None:
+        kwargs["require_approval"] = body.require_approval
+    if not kwargs:
+        return UserPublic(user_id=user.user_id, username=user.username, role=user.role, created_at=user.created_at, require_approval=user.require_approval)
+    updated = user_repo.update(user_id, **kwargs)
+    return UserPublic(user_id=updated.user_id, username=updated.username, role=updated.role, created_at=updated.created_at, require_approval=updated.require_approval)
+
+
+@app.delete("/api/users/{user_id}", status_code=204)
+def delete_user(
+    user_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> None:
+    if current_user.user_id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    user_repo: UserRepository = request.app.state.user_repo
+    try:
+        user_repo.delete(user_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
+
+
 # ── Manual run ────────────────────────────────────────────────────────────────
+
+
+def _assert_run_access(ctx: RunContext, current_user: User) -> None:
+    """Raise HTTP 404 if the current user doesn't own this run. Admins bypass."""
+    if current_user.role == "admin":
+        return
+    if ctx.owner_id != current_user.user_id:
+        raise HTTPException(status_code=404, detail=f"Run {ctx.run_id!r} not found")
 
 
 class RunRequest(BaseModel):
@@ -210,7 +383,7 @@ class GeneratePolicyRequest(BaseModel):
 
 
 @app.post("/api/agent/run", status_code=202, response_model=RunResponse)
-def start_run(request: RunRequest, req: Request) -> RunResponse:
+def start_run(request: RunRequest, req: Request, current_user: User = Depends(get_current_user)) -> RunResponse:
     run_id = str(uuid.uuid4())
 
     seeded_history: list = []
@@ -223,6 +396,8 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
         with _runs_lock:
             parent_ctx = _runs.get(request.context_run_id)
             if parent_ctx is not None:
+                if current_user.role != "admin" and parent_ctx.owner_id != current_user.user_id:
+                    raise HTTPException(status_code=404, detail=f"Run {request.context_run_id!r} not found")
                 history_snapshot = list(parent_ctx.history)
                 seeded_overrides = dict(parent_ctx.skill_overrides)
                 parent_run_id = request.context_run_id
@@ -241,6 +416,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
         skill_overrides=seeded_overrides,
         parent_run_id=parent_run_id,
         llm_model=seeded_model,
+        owner_id=current_user.user_id,
     )
     skill_repo = req.app.state.skill_repo
     remote_skill_repo = getattr(req.app.state, "remote_skill_repo", None)
@@ -261,6 +437,7 @@ def start_run(request: RunRequest, req: Request) -> RunResponse:
         workflow = _build_workflow(
             skill_repo, run_id=run_id, ctx=ctx, remote_skill_repo=remote_skill_repo,
             secrets_store=req.app.state.secrets_store,
+            user_require_approval=current_user.require_approval,
         )
         with _workflows_lock:
             _workflows[run_id] = workflow
@@ -307,7 +484,7 @@ def _resolve_root_run_id(run_id: str) -> str:
 
 
 @app.get("/api/agent/runs/search", response_model=list[SearchHit])
-def search_runs(q: str = "") -> list[SearchHit]:
+def search_runs(q: str = "", current_user: User = Depends(get_current_user)) -> list[SearchHit]:
     """Full-text search across all runs (prompt, summary, command history)."""
     if not q.strip():
         return []
@@ -316,6 +493,8 @@ def search_runs(q: str = "") -> list[SearchHit]:
         runs_snapshot = list(_runs.values())
     hits: list[SearchHit] = []
     for ctx in runs_snapshot:
+        if current_user.role != "admin" and ctx.owner_id != current_user.user_id:
+            continue
         if _run_matches(ctx, query):
             hits.append(SearchHit(
                 run_id=ctx.run_id,
@@ -328,18 +507,22 @@ def search_runs(q: str = "") -> list[SearchHit]:
 
 
 @app.get("/api/agent/runs/{run_id}")
-def get_run(run_id: str) -> Any:
+def get_run(run_id: str, current_user: User = Depends(get_current_user)) -> Any:
     with _runs_lock:
         ctx = _runs.get(run_id)
     if ctx is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    _assert_run_access(ctx, current_user)
     return ctx.model_dump()
 
 
 @app.get("/api/agent/runs")
-def list_runs() -> list[dict]:
+def list_runs(current_user: User = Depends(get_current_user)) -> list[dict]:
     with _runs_lock:
-        return [ctx.model_dump() for ctx in _runs.values()]
+        runs = list(_runs.values())
+    if current_user.role != "admin":
+        runs = [ctx for ctx in runs if ctx.owner_id == current_user.user_id]
+    return [ctx.model_dump() for ctx in runs]
 
 
 def _collect_descendants(root_run_id: str) -> set[str]:
@@ -360,10 +543,12 @@ def _collect_descendants(root_run_id: str) -> set[str]:
 
 
 @app.delete("/api/agent/runs/{run_id}", status_code=204)
-def delete_run(run_id: str, request: Request) -> None:
+def delete_run(run_id: str, request: Request, current_user: User = Depends(get_current_user)) -> None:
     with _runs_lock:
-        if run_id not in _runs:
-            raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+        ctx = _runs.get(run_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+    _assert_run_access(ctx, current_user)
 
     to_delete = _collect_descendants(run_id)
 
@@ -388,7 +573,7 @@ class ModelsResponse(BaseModel):
 
 
 @app.get("/api/models", response_model=ModelsResponse)
-def get_models(request: Request) -> ModelsResponse:
+def get_models(request: Request, current_user: User = Depends(get_current_user)) -> ModelsResponse:
     app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
     app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
     default_model = app_settings.default_model or settings.llm_model
@@ -444,7 +629,7 @@ class SettingsPatchRequest(BaseModel):
 
 
 @app.get("/api/settings", response_model=SettingsResponse)
-def get_settings(request: Request) -> SettingsResponse:
+def get_settings(request: Request, current_user: User = Depends(require_admin)) -> SettingsResponse:
     app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
     app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
     with _settings_lock:
@@ -462,8 +647,15 @@ def get_settings(request: Request) -> SettingsResponse:
         )
 
 
+@app.get("/api/settings/approval")
+def get_approval_status(current_user: User = Depends(get_current_user)) -> dict:
+    """Returns the global approval_required flag. Accessible to all authenticated users."""
+    with _settings_lock:
+        return {"approval_required": _approval_required}
+
+
 @app.put("/api/settings", response_model=SettingsResponse)
-def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsResponse:
+def put_settings(body: SettingsPatchRequest, request: Request, current_user: User = Depends(require_admin)) -> SettingsResponse:
     global _approval_required, _llm_base_url, _llm_api_key
 
     # ── LLM settings (in-memory + persisted) ─────────────────────────────────
@@ -564,7 +756,12 @@ def put_settings(body: SettingsPatchRequest, request: Request) -> SettingsRespon
 
 
 @app.post("/api/agent/runs/{run_id}/approve", status_code=200)
-def approve_command(run_id: str) -> dict:
+def approve_command(run_id: str, current_user: User = Depends(get_current_user)) -> dict:
+    with _runs_lock:
+        ctx = _runs.get(run_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+    _assert_run_access(ctx, current_user)
     with _pending_approvals_lock:
         approval = _pending_approvals.pop(run_id, None)
     if approval is None:
@@ -577,7 +774,12 @@ def approve_command(run_id: str) -> dict:
 
 
 @app.post("/api/agent/runs/{run_id}/deny", status_code=200)
-def deny_command(run_id: str) -> dict:
+def deny_command(run_id: str, current_user: User = Depends(get_current_user)) -> dict:
+    with _runs_lock:
+        ctx = _runs.get(run_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+    _assert_run_access(ctx, current_user)
     with _pending_approvals_lock:
         approval = _pending_approvals.pop(run_id, None)
     if approval is None:
@@ -589,7 +791,12 @@ def deny_command(run_id: str) -> dict:
 
 
 @app.post("/api/agent/runs/{run_id}/abort", status_code=200)
-def abort_run(run_id: str) -> dict:
+def abort_run(run_id: str, current_user: User = Depends(get_current_user)) -> dict:
+    with _runs_lock:
+        ctx = _runs.get(run_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+    _assert_run_access(ctx, current_user)
     with _workflows_lock:
         workflow = _workflows.get(run_id)
     if workflow is None:
@@ -609,12 +816,12 @@ def abort_run(run_id: str) -> dict:
 
 
 @app.get("/api/skills")
-def list_skills(request: Request) -> list:
+def list_skills(request: Request, current_user: User = Depends(get_current_user)) -> list:
     return [s.model_dump(mode="json") for s in _all_skills(request)]
 
 
 @app.post("/api/skills/sync")
-def sync_remote_skills(request: Request) -> dict:
+def sync_remote_skills(request: Request, current_user: User = Depends(require_admin)) -> dict:
     remote_repo = getattr(request.app.state, "remote_skill_repo", None)
     if remote_repo is None:
         raise HTTPException(
@@ -628,7 +835,7 @@ def sync_remote_skills(request: Request) -> dict:
 
 
 @app.post("/api/skills/generate-policy")
-def generate_policy_endpoint(body: GeneratePolicyRequest, request: Request) -> dict:
+def generate_policy_endpoint(body: GeneratePolicyRequest, request: Request, current_user: User = Depends(require_admin)) -> dict:
     with _settings_lock:
         llm_base_url = _llm_base_url
         llm_api_key = _llm_api_key
@@ -650,7 +857,7 @@ def generate_policy_endpoint(body: GeneratePolicyRequest, request: Request) -> d
 
 
 @app.get("/api/skills/{skill_id}")
-def get_skill(skill_id: str, request: Request) -> Any:
+def get_skill(skill_id: str, request: Request, current_user: User = Depends(get_current_user)) -> Any:
     try:
         return request.app.state.skill_repo.get(skill_id).model_dump(mode="json")
     except KeyError:
@@ -658,7 +865,7 @@ def get_skill(skill_id: str, request: Request) -> Any:
 
 
 @app.post("/api/skills", status_code=201)
-def create_skill(body: SkillCreateRequest, request: Request) -> Any:
+def create_skill(body: SkillCreateRequest, request: Request, current_user: User = Depends(require_admin)) -> Any:
     remote_repo = getattr(request.app.state, "remote_skill_repo", None)
     if remote_repo:
         remote_names = {s.name.lower() for s in remote_repo.list_skills()}
@@ -678,7 +885,7 @@ def create_skill(body: SkillCreateRequest, request: Request) -> Any:
 
 
 @app.patch("/api/skills/{skill_id}")
-def patch_skill(skill_id: str, body: SkillPatchRequest, request: Request) -> Any:
+def patch_skill(skill_id: str, body: SkillPatchRequest, request: Request, current_user: User = Depends(require_admin)) -> Any:
     remote_repo = getattr(request.app.state, "remote_skill_repo", None)
     if remote_repo:
         remote_ids = {s.id for s in remote_repo.list_skills()}
@@ -705,7 +912,7 @@ def patch_skill(skill_id: str, body: SkillPatchRequest, request: Request) -> Any
 
 
 @app.delete("/api/skills/{skill_id}", status_code=204)
-def delete_skill(skill_id: str, request: Request) -> None:
+def delete_skill(skill_id: str, request: Request, current_user: User = Depends(require_admin)) -> None:
     remote_repo = getattr(request.app.state, "remote_skill_repo", None)
     if remote_repo:
         remote_ids = {s.id for s in remote_repo.list_skills()}
@@ -756,11 +963,12 @@ def _run_skill_response(skill, overrides: dict[str, bool]) -> RunSkillResponse:
 
 
 @app.get("/api/agent/runs/{run_id}/skills")
-def get_run_skills(run_id: str, request: Request) -> list[RunSkillResponse]:
+def get_run_skills(run_id: str, request: Request, current_user: User = Depends(get_current_user)) -> list[RunSkillResponse]:
     with _runs_lock:
         ctx = _runs.get(run_id)
     if ctx is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+    _assert_run_access(ctx, current_user)
     skills = _all_skills(request)
     return [_run_skill_response(s, ctx.skill_overrides) for s in skills]
 
@@ -771,11 +979,13 @@ def patch_run_skill(
     skill_id: str,
     body: RunSkillPatchRequest,
     request: Request,
+    current_user: User = Depends(get_current_user),
 ) -> RunSkillResponse:
     with _runs_lock:
         ctx = _runs.get(run_id)
     if ctx is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+    _assert_run_access(ctx, current_user)
     skill = next((candidate for candidate in _all_skills(request) if candidate.id == skill_id), None)
     if skill is None:
         raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} not found")
