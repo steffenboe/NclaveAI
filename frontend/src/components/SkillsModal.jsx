@@ -8,6 +8,11 @@ export default function SkillsModal({ onClose }) {
   const isAdmin = user?.role === 'admin'
   const [approvalRequired, setApprovalRequired] = useState(user?.require_approval ?? false)
   const [globalApprovalRequired, setGlobalApprovalRequired] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordSuccess, setPasswordSuccess] = useState(false)
   const [llmEndpoint, setLlmEndpoint] = useState('')
   const [llmToken, setLlmToken] = useState('')
   const [tokenMasked, setTokenMasked] = useState(false)
@@ -91,6 +96,32 @@ export default function SkillsModal({ onClose }) {
       const res = await fetch('/api/skills')
       if (res.ok) setSkills(await res.json())
     } catch {}
+  }
+
+  async function changePassword(e) {
+    e.preventDefault()
+    setPasswordError('')
+    setPasswordSuccess(false)
+    setChangingPassword(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setPasswordError(data.detail || 'Failed to change password')
+        return
+      }
+      setCurrentPassword('')
+      setNewPassword('')
+      setPasswordSuccess(true)
+    } catch {
+      setPasswordError('Failed to change password')
+    } finally {
+      setChangingPassword(false)
+    }
   }
 
   async function onApprovalToggle(checked) {
@@ -363,7 +394,38 @@ export default function SkillsModal({ onClose }) {
                 ℹ️ Approval is also enforced globally by your administrator.
               </div>
             )}
-            {isAdmin && (<>
+          </div>
+
+          {/* Change password */}
+          <div className="settings-section">
+            <div className="settings-field-title" style={{ marginBottom: '6px' }}>Change password</div>
+            <form onSubmit={changePassword} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <input
+                type="password"
+                placeholder="Current password"
+                value={currentPassword}
+                onChange={e => { setCurrentPassword(e.target.value); setPasswordError(''); setPasswordSuccess(false) }}
+                required
+              />
+              <input
+                type="password"
+                placeholder="New password"
+                value={newPassword}
+                onChange={e => { setNewPassword(e.target.value); setPasswordError(''); setPasswordSuccess(false) }}
+                required
+              />
+              {passwordError && <div className="settings-error">{passwordError}</div>}
+              {passwordSuccess && <div className="settings-help" style={{ color: 'var(--green, #3fb950)' }}>Password changed.</div>}
+              <div className="form-actions" style={{ marginTop: 0 }}>
+                <button type="submit" className="btn-sm btn-secondary" disabled={changingPassword}>
+                  {changingPassword ? 'Saving…' : 'Change password'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {isAdmin && (
+          <div className="settings-section">
             <div className="settings-field">
               <div className="settings-field-title">LLM endpoint</div>
               <input
@@ -392,8 +454,8 @@ export default function SkillsModal({ onClose }) {
             <div className="form-actions" style={{ marginTop: 0 }}>
               <button className="btn-sm btn-secondary" onClick={saveLlmSettings}>Save LLM settings</button>
             </div>
-            </>)}
           </div>
+          )}
 
           {/* Remote skill repository */}
           {isAdmin && (
