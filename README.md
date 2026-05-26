@@ -20,6 +20,7 @@ A safe-to-use, local AI agent that turns natural-language prompts into CLI comma
 - [Secrets](#secrets)
 - [OPA policy](#opa-policy)
 - [Configuration](#configuration)
+- [User management](#user-management)
 - [API reference](#api-reference)
 - [Development](#development)
 - [Contributing](#contributing)
@@ -324,6 +325,53 @@ The policy receives `input.argv` — the proposed command as a list of strings. 
 | `COMMAND_TIMEOUT_SECONDS` | no | `30` | Seconds before a running command is killed |
 
 > **Remote skill repository** is now configured via the UI (Settings modal → Remote skill repository), not via environment variables.
+
+---
+
+## User management
+
+The agent has a built-in multi-user system with two roles: **admin** and **user**.
+
+### Roles
+
+| Role | What they can do |
+|---|---|
+| `admin` | Full access: manage users, configure LLM endpoint and API key, manage skills (create / edit / delete), configure the remote skill repository, set the global approval flag, choose the default model |
+| `user` | Start runs, view conversation history, view the skills list (read-only), toggle their own per-user approval setting |
+
+### Bootstrap
+
+The first admin account is created automatically on startup when the users file is empty, using the credentials from the environment:
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=changeme
+```
+
+Change the password immediately after the first login.
+
+### Managing users
+
+Admins see a **👥** button in the bottom-left of the sidebar. This opens the **User Management** modal where you can:
+
+- Create new users (username, password, role)
+- Delete existing users (you cannot delete your own account)
+
+### User settings
+
+Each user has a personal **Require approval before each command** toggle, accessible via the gear (⚙) icon in the sidebar. When enabled, the agent pauses before executing each command and waits for the user to approve or deny it in the UI.
+
+This setting is per-user and persisted independently for each account. It can be changed at any time without affecting other users.
+
+### Global approval override
+
+Admins can also set a **global** approval requirement via the same Settings modal. When the global flag is on, every user's runs require approval regardless of their personal setting. A notice is shown in the user's settings modal when the admin has enforced this:
+
+> ℹ️ Approval is also enforced globally by your administrator.
+
+### Password change
+
+Any user can change their own password via **Settings → Change password** (accessible from the user menu in the sidebar).
 
 ---
 
