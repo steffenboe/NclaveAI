@@ -1,8 +1,26 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+
+class User(BaseModel):
+    user_id: str
+    username: str
+    hashed_password: str
+    role: Literal["admin", "user"]
+    created_at: datetime
+    require_approval: bool = False
+
+
+class UserPublic(BaseModel):
+    user_id: str
+    username: str
+    role: Literal["admin", "user"]
+    created_at: datetime
+    require_approval: bool = False
 
 
 class Command(BaseModel):
@@ -45,3 +63,4 @@ class RunContext(BaseModel):
     parent_run_id: str | None = None
     skill_overrides: dict[str, bool] = {}
     llm_model: str | None = None
+    owner_id: str | None = None

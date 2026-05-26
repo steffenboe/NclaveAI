@@ -22,5 +22,13 @@ class Settings(BaseSettings):
 
     secrets_file: Path = Path("./secrets.json")
 
+    users_file: Path = Path("./users.json")
+
+    jwt_secret: str = "change-me-in-production"
+
+    admin_username: str = "admin"
+
+    admin_password: str = ""
+
 
 settings = Settings()

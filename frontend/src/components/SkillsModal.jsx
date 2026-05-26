@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../AuthContext'
 
 const MASKED_TOKEN_VALUE = '********'
 
 export default function SkillsModal({ onClose }) {
-  const [approvalRequired, setApprovalRequired] = useState(false)
+  const { user, setUser } = useAuth()
+  const isAdmin = user?.role === 'admin'
+  const [approvalRequired, setApprovalRequired] = useState(user?.require_approval ?? false)
+  const [globalApprovalRequired, setGlobalApprovalRequired] = useState(false)
   const [llmEndpoint, setLlmEndpoint] = useState('')
   const [llmToken, setLlmToken] = useState('')
   const [tokenMasked, setTokenMasked] = useState(false)
@@ -34,10 +38,17 @@ export default function SkillsModal({ onClose }) {
   }, [detailSkill])
 
   useEffect(() => {
-    loadSettings()
+    if (isAdmin) {
+      loadSettings()
+      loadSecrets()
+      fetchModelsFromApi()
+    } else {
+      fetch('/api/settings/approval')
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setGlobalApprovalRequired(d.approval_required) })
+        .catch(() => {})
+    }
     loadSkills()
-    loadSecrets()
-    fetchModelsFromApi()
   }, [])
 
   useEffect(() => {
@@ -83,14 +94,29 @@ export default function SkillsModal({ onClose }) {
   }
 
   async function onApprovalToggle(checked) {
-    try {
-      const res = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approval_required: checked }),
-      })
-      if (res.ok) setApprovalRequired(checked)
-    } catch {}
+    if (isAdmin) {
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approval_required: checked }),
+        })
+        if (res.ok) setApprovalRequired(checked)
+      } catch {}
+    } else {
+      try {
+        const res = await fetch(`/api/users/${user.user_id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ require_approval: checked }),
+        })
+        if (res.ok) {
+          const updated = await res.json()
+          setApprovalRequired(checked)
+          setUser(updated)
+        }
+      } catch {}
+    }
   }
 
   async function saveLlmSettings() {
@@ -332,6 +358,12 @@ export default function SkillsModal({ onClose }) {
               />
               Require approval before each command
             </label>
+            {!isAdmin && globalApprovalRequired && (
+              <div className="settings-help" style={{ marginTop: '4px' }}>
+                ℹ️ Approval is also enforced globally by your administrator.
+              </div>
+            )}
+            {isAdmin && (<>
             <div className="settings-field">
               <div className="settings-field-title">LLM endpoint</div>
               <input
@@ -360,9 +392,11 @@ export default function SkillsModal({ onClose }) {
             <div className="form-actions" style={{ marginTop: 0 }}>
               <button className="btn-sm btn-secondary" onClick={saveLlmSettings}>Save LLM settings</button>
             </div>
+            </>)}
           </div>
 
           {/* Remote skill repository */}
+          {isAdmin && (
           <div className="settings-section">
             <div className="settings-field">
               <div className="settings-field-title">Remote skill repository URL</div>
@@ -391,8 +425,10 @@ export default function SkillsModal({ onClose }) {
               </button>
             </div>
           </div>
+          )}
 
           {/* Model configuration */}
+          {isAdmin && (
           <div className="settings-section">
             <div className="settings-field">
               <div className="settings-field-title">Available models</div>
@@ -427,6 +463,7 @@ export default function SkillsModal({ onClose }) {
               </button>
             </div>
           </div>
+          )}
 
           {/* Remote skill detail view */}
           {detailSkill !== null && (
@@ -538,7 +575,7 @@ export default function SkillsModal({ onClose }) {
                           </span>
                           <button className="btn-sm btn-secondary" onClick={() => setDetailSkill(d => d?.id === skill.id ? null : skill)}>Details</button>
                         </>
-                      ) : (
+                      ) : isAdmin ? (
                         <>
                           <button
                             className={'toggle-enabled' + (skill.enabled ? ' on' : '')}
@@ -549,6 +586,10 @@ export default function SkillsModal({ onClose }) {
                           <button className="btn-sm btn-secondary" onClick={() => showSkillForm(skill)}>Edit</button>
                           <button className="btn-sm btn-danger" onClick={() => deleteSkill(skill.id)}>Del</button>
                         </>
+                      ) : (
+                        <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
+                          {skill.enabled ? 'enabled' : 'disabled'}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -557,8 +598,10 @@ export default function SkillsModal({ onClose }) {
           </div>
 
           <div className="modal-skills-footer">
-            <button className="modal-add-btn" onClick={() => showSkillForm(undefined)}>+ Add skill</button>
-            {skillsRepoConfigured && (
+            {isAdmin && (
+              <button className="modal-add-btn" onClick={() => showSkillForm(undefined)}>+ Add skill</button>
+            )}
+            {isAdmin && skillsRepoConfigured && (
               <button className="btn-sm btn-secondary" onClick={syncRemoteSkills} disabled={syncing}>
                 {syncing ? 'Syncing\u2026' : 'Sync remote skills'}
               </button>

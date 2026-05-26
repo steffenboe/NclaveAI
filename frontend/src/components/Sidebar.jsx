@@ -21,6 +21,7 @@ export default function Sidebar({
   runs, runOrder, selectedRootId,
   onNewChat, onSelectConversation, onDeleteConversation, onOpenSettings,
   searchQuery, searchResults, onSearch,
+  user, onLogout, onOpenUsersModal,
 }) {
   const roots = getRoots(runs, runOrder).slice().reverse()
   const isSearching = searchQuery.trim().length > 0
@@ -97,6 +98,15 @@ export default function Sidebar({
       </div>
 
       <div className="sidebar-bottom">
+        {user && (
+          <div className="sidebar-user">
+            <span className="sidebar-username" title={user.username}>{user.username}</span>
+            {onOpenUsersModal && (
+              <button className="btn-users" onClick={onOpenUsersModal} title="Manage users">👥</button>
+            )}
+            <button className="btn-logout" onClick={onLogout} title="Sign out">⏏</button>
+          </div>
+        )}
         <button className="btn-gear" onClick={onOpenSettings} title="Skills &amp; Settings">⚙</button>
       </div>
     </div>

@@ -52,15 +52,21 @@ class RunRepository:
             self._runs[ctx.run_id] = ctx
             self._save_all()
 
-    def list(self) -> list[RunContext]:
+    def list(self, owner_id: str | None = None) -> list[RunContext]:
         with self._lock:
-            return [ctx.model_copy() for ctx in self._runs.values()]
+            runs = list(self._runs.values())
+        if owner_id is not None:
+            runs = [ctx for ctx in runs if ctx.owner_id == owner_id]
+        return [ctx.model_copy() for ctx in runs]
 
-    def get(self, run_id: str) -> RunContext:
+    def get(self, run_id: str, owner_id: str | None = None) -> RunContext:
         with self._lock:
             if run_id not in self._runs:
                 raise KeyError(run_id)
-            return self._runs[run_id].model_copy()
+            ctx = self._runs[run_id]
+            if owner_id is not None and ctx.owner_id != owner_id:
+                raise KeyError(run_id)
+            return ctx.model_copy()
 
     def delete(self, run_id: str) -> None:
         """Delete a single run by id. Thread-safe."""
