@@ -9,6 +9,7 @@ def pytest_configure(config):
     os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
     os.environ.setdefault("ADMIN_USERNAME", "admin")
     os.environ.setdefault("ADMIN_PASSWORD", "Admin123!")
+    os.environ.setdefault("OPENAI_API_KEY", "")
     # Redirect only the new users file so the lifespan bootstrap never writes
     # to the project root.  The client fixture replaces all other repos anyway.
     os.environ.setdefault("USERS_FILE", f"{_tmpdir}/users.json")
