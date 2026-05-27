@@ -649,9 +649,12 @@ export default function SkillsModal({ onClose }) {
                           <button className="btn-sm btn-danger" onClick={() => deleteSkill(skill.id)}>Del</button>
                         </>
                       ) : (
-                        <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
-                          {skill.enabled ? 'enabled' : 'disabled'}
-                        </span>
+                        <>
+                          <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
+                            {skill.enabled ? 'enabled' : 'disabled'}
+                          </span>
+                          <button className="btn-sm btn-secondary" onClick={() => setDetailSkill(d => d?.id === skill.id ? null : skill)}>Details</button>
+                        </>
                       )}
                     </div>
                   </div>

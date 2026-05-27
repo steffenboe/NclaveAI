@@ -839,11 +839,14 @@ def generate_policy_endpoint(body: GeneratePolicyRequest, request: Request, curr
     with _settings_lock:
         llm_base_url = _llm_base_url
         llm_api_key = _llm_api_key
+    app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
+    app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
+    llm_model = app_settings.default_model or settings.llm_model
     planner = Planner(
         request.app.state.skill_repo,
         llm_base_url=llm_base_url,
         llm_api_key=llm_api_key,
-        llm_model=settings.llm_model,
+        llm_model=llm_model,
     )
     try:
         policy = planner.generate_policy(
