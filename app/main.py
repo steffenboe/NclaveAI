@@ -106,7 +106,11 @@ async def lifespan(app: FastAPI):
 
         _mongo_client = MongoClient(settings.mongodb_uri)
         mongo_db = _mongo_client[settings.mongodb_db_name]
-        logger.info("Using MongoDB backend: %s / %s", settings.mongodb_uri, settings.mongodb_db_name)
+        from urllib.parse import urlparse, urlunparse
+        _parsed = urlparse(settings.mongodb_uri)
+        _host = (_parsed.hostname or "") + (f":{_parsed.port}" if _parsed.port else "")
+        _safe_uri = urlunparse(_parsed._replace(netloc=_host))
+        logger.info("Using MongoDB backend: %s / %s", _safe_uri, settings.mongodb_db_name)
 
         skill_repo = MongoSkillRepository(mongo_db)
         app_settings_repo = MongoAppSettingsRepository(mongo_db)
@@ -131,12 +135,13 @@ async def lifespan(app: FastAPI):
             _llm_api_key = app_settings.llm_api_key
     app.state.remote_skill_repo = None
     if app_settings.skills_repo_url:
+        import asyncio
         remote_repo = RemoteSkillRepository(
             app_settings.skills_repo_url,
             branch=app_settings.skills_repo_branch,
         )
         try:
-            remote_repo.sync()
+            await asyncio.to_thread(remote_repo.sync)
             app.state.remote_skill_repo = remote_repo
             logger.info("Remote skills loaded from %s", app_settings.skills_repo_url)
         except Exception as exc:

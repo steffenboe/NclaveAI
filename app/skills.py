@@ -144,7 +144,10 @@ class RemoteSkillRepository:
                 self._repo_url,
                 str(self._cache_dir),
             ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"git command timed out after 60s: {' '.join(cmd)}") from exc
         if result.returncode != 0:
             raise RuntimeError(
                 f"git command failed (exit {result.returncode}): {result.stderr.strip()}"
