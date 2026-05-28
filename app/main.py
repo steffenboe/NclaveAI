@@ -93,8 +93,36 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.skill_repo = SkillRepository(settings.skills_file)
-    app_settings_repo = AppSettingsRepository(settings.settings_file)
+    # --- persistence backend selection ---
+    if settings.mongodb_uri:
+        from pymongo import MongoClient
+
+        from app.mongo_repos import (
+            MongoAppSettingsRepository,
+            MongoRunRepository,
+            MongoSkillRepository,
+            MongoUserRepository,
+        )
+
+        _mongo_client = MongoClient(settings.mongodb_uri)
+        mongo_db = _mongo_client[settings.mongodb_db_name]
+        from urllib.parse import urlparse, urlunparse
+        _parsed = urlparse(settings.mongodb_uri)
+        _host = (_parsed.hostname or "") + (f":{_parsed.port}" if _parsed.port else "")
+        _safe_uri = urlunparse(_parsed._replace(netloc=_host))
+        logger.info("Using MongoDB backend: %s / %s", _safe_uri, settings.mongodb_db_name)
+
+        skill_repo = MongoSkillRepository(mongo_db)
+        app_settings_repo = MongoAppSettingsRepository(mongo_db)
+        run_repo = MongoRunRepository(mongo_db)
+        user_repo = MongoUserRepository(mongo_db)
+    else:
+        skill_repo = SkillRepository(settings.skills_file)
+        app_settings_repo = AppSettingsRepository(settings.settings_file)
+        run_repo = RunRepository(settings.runs_file)
+        user_repo = UserRepository(settings.users_file)
+
+    app.state.skill_repo = skill_repo
     app.state.app_settings_repo = app_settings_repo
     app_settings = app_settings_repo.load()
 
@@ -107,24 +135,23 @@ async def lifespan(app: FastAPI):
             _llm_api_key = app_settings.llm_api_key
     app.state.remote_skill_repo = None
     if app_settings.skills_repo_url:
+        import asyncio
         remote_repo = RemoteSkillRepository(
             app_settings.skills_repo_url,
             branch=app_settings.skills_repo_branch,
         )
         try:
-            remote_repo.sync()
+            await asyncio.to_thread(remote_repo.sync)
             app.state.remote_skill_repo = remote_repo
             logger.info("Remote skills loaded from %s", app_settings.skills_repo_url)
         except Exception as exc:
             logger.warning("Failed to load remote skills: %s", exc)
 
-    run_repo = RunRepository(settings.runs_file)
     app.state.run_repo = run_repo
     app.state.secrets_store = SecretsStore(settings.secrets_file)
     with _runs_lock:
         _runs.update(run_repo.all_as_dict())
 
-    user_repo = UserRepository(settings.users_file)
     app.state.user_repo = user_repo
     if user_repo.count() == 0 and settings.admin_password:
         user_repo.create(
