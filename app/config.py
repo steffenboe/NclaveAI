@@ -30,5 +30,9 @@ class Settings(BaseSettings):
 
     admin_password: str = ""
 
+    mongodb_uri: str | None = None
+
+    mongodb_db_name: str = "llm-opa-agent"
+
 
 settings = Settings()
