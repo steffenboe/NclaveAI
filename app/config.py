@@ -18,6 +18,8 @@ class Settings(BaseSettings):
 
     runs_file: Path = Path("./runs.json")
 
+    scheduled_tasks_file: Path = Path("./scheduled_tasks.json")
+
     settings_file: Path = Path("./settings.json")
 
     secrets_file: Path = Path("./secrets.json")

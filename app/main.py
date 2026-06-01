@@ -9,9 +9,12 @@ import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
+from croniter import croniter
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,10 +23,11 @@ from pydantic import BaseModel
 from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
 from app.config import settings
 from app.executor import CommandExecutor
-from app.models import Command, RunContext, User, UserPublic
+from app.models import Command, RunContext, ScheduledTask, User, UserPublic
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 from app.runs import RunRepository, _match_hint, _run_matches
+from app.scheduled_tasks import ScheduledTaskRepository
 from app.secrets_store import SecretsStore
 from app.settings_store import AppSettings, AppSettingsRepository
 from app.skills import RemoteSkillRepository, SkillRepository
@@ -44,6 +48,11 @@ _runs: dict[str, RunContext] = {}
 _runs_lock = threading.Lock()
 _workflows: dict[str, AgentWorkflow] = {}
 _workflows_lock = threading.Lock()
+
+_scheduled_tasks: dict[str, ScheduledTask] = {}
+_scheduled_tasks_lock = threading.Lock()
+_scheduler_stop_event = threading.Event()
+_scheduler_thread: threading.Thread | None = None
 
 # Approval gate state
 _approval_required: bool = False
@@ -91,6 +100,165 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
     return gate
 
 
+def _validate_timezone(tz_name: str) -> str:
+    try:
+        ZoneInfo(tz_name)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Unknown timezone: {tz_name!r}") from exc
+    return tz_name
+
+
+def _compute_next_run_at(cron_expr: str, tz_name: str, now_utc: datetime | None = None) -> datetime:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    tz = ZoneInfo(tz_name)
+    local_now = now_utc.astimezone(tz)
+    try:
+        next_local = croniter(cron_expr, local_now).get_next(datetime)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid cron expression: {cron_expr!r}") from exc
+    if next_local.tzinfo is None:
+        next_local = next_local.replace(tzinfo=tz)
+    return next_local.astimezone(timezone.utc)
+
+
+def _assert_task_access(task: ScheduledTask, current_user: User) -> None:
+    if task.owner_id != current_user.user_id:
+        raise HTTPException(status_code=404, detail=f"Scheduled task {task.task_id!r} not found")
+
+
+def _start_run_internal(
+    *,
+    prompt: str,
+    app: FastAPI,
+    current_user: User,
+    llm_model: str | None = None,
+    context_run_id: str | None = None,
+) -> RunResponse:
+    run_id = str(uuid.uuid4())
+
+    seeded_history: list = []
+    history_start_index = 0
+    seeded_overrides: dict[str, bool] = {}
+    parent_run_id: str | None = None
+    seeded_model: str | None = llm_model
+    history_snapshot: list = []
+    if context_run_id is not None:
+        with _runs_lock:
+            parent_ctx = _runs.get(context_run_id)
+            if parent_ctx is not None:
+                if current_user.role != "admin" and parent_ctx.owner_id != current_user.user_id:
+                    raise HTTPException(status_code=404, detail=f"Run {context_run_id!r} not found")
+                history_snapshot = list(parent_ctx.history)
+                seeded_overrides = dict(parent_ctx.skill_overrides)
+                parent_run_id = context_run_id
+                if seeded_model is None:
+                    seeded_model = parent_ctx.llm_model
+        if parent_run_id is not None:
+            seeded_history = copy.deepcopy(history_snapshot)
+            history_start_index = len(seeded_history)
+
+    ctx = RunContext(
+        run_id=run_id,
+        prompt=prompt,
+        history=seeded_history,
+        history_start_index=history_start_index,
+        skill_overrides=seeded_overrides,
+        parent_run_id=parent_run_id,
+        llm_model=seeded_model,
+        owner_id=current_user.user_id,
+    )
+    skill_repo = app.state.skill_repo
+    remote_skill_repo = getattr(app.state, "remote_skill_repo", None)
+    run_repo = app.state.run_repo
+
+    if seeded_model is None:
+        app_settings_repo = getattr(app.state, "app_settings_repo", None)
+        app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
+        seeded_model = app_settings.default_model or settings.llm_model
+    ctx.llm_model = seeded_model
+
+    with _runs_lock:
+        _runs[run_id] = ctx
+    run_repo.save(ctx)
+
+    def _execute() -> None:
+        workflow = _build_workflow(
+            skill_repo,
+            run_id=run_id,
+            ctx=ctx,
+            remote_skill_repo=remote_skill_repo,
+            secrets_store=app.state.secrets_store,
+            user_require_approval=current_user.require_approval,
+        )
+        with _workflows_lock:
+            _workflows[run_id] = workflow
+        try:
+            result = workflow.run(
+                prompt=prompt,
+                max_iterations=settings.max_iterations,
+                ctx=ctx,
+            )
+            with _runs_lock:
+                _runs[run_id] = result
+            run_repo.save(result)
+        finally:
+            with _workflows_lock:
+                _workflows.pop(run_id, None)
+
+    thread = threading.Thread(target=_execute, daemon=True)
+    thread.start()
+
+    return RunResponse(run_id=run_id, status="running")
+
+
+def _scheduler_loop(app: FastAPI) -> None:
+    while not _scheduler_stop_event.wait(timeout=1):
+        now = datetime.now(timezone.utc)
+        due_tasks: list[ScheduledTask] = []
+        with _scheduled_tasks_lock:
+            for task in _scheduled_tasks.values():
+                if not task.enabled or task.next_run_at is None:
+                    continue
+                if task.next_run_at <= now:
+                    due_tasks.append(task.model_copy())
+
+        for task in due_tasks:
+            try:
+                user_repo = app.state.user_repo
+                owner = user_repo.get(task.owner_id)
+                if owner is None:
+                    raise RuntimeError(f"owner {task.owner_id!r} not found")
+
+                run_response = _start_run_internal(
+                    prompt=task.prompt,
+                    app=app,
+                    current_user=owner,
+                )
+
+                with _scheduled_tasks_lock:
+                    live = _scheduled_tasks.get(task.task_id)
+                    if live is None:
+                        continue
+                    live.last_run_at = now
+                    live.last_run_id = run_response.run_id
+                    live.last_error = None
+                    live.next_run_at = _compute_next_run_at(live.cron, live.timezone, now)
+                    live.updated_at = now
+                    app.state.scheduled_task_repo.save(live)
+            except Exception as exc:
+                with _scheduled_tasks_lock:
+                    live = _scheduled_tasks.get(task.task_id)
+                    if live is None:
+                        continue
+                    live.last_error = str(exc)
+                    try:
+                        live.next_run_at = _compute_next_run_at(live.cron, live.timezone, now)
+                    except Exception:
+                        live.next_run_at = None
+                    live.updated_at = now
+                    app.state.scheduled_task_repo.save(live)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- persistence backend selection ---
@@ -100,6 +268,7 @@ async def lifespan(app: FastAPI):
         from app.mongo_repos import (
             MongoAppSettingsRepository,
             MongoRunRepository,
+            MongoScheduledTaskRepository,
             MongoSkillRepository,
             MongoUserRepository,
         )
@@ -115,11 +284,13 @@ async def lifespan(app: FastAPI):
         skill_repo = MongoSkillRepository(mongo_db)
         app_settings_repo = MongoAppSettingsRepository(mongo_db)
         run_repo = MongoRunRepository(mongo_db)
+        scheduled_task_repo = MongoScheduledTaskRepository(mongo_db)
         user_repo = MongoUserRepository(mongo_db)
     else:
         skill_repo = SkillRepository(settings.skills_file)
         app_settings_repo = AppSettingsRepository(settings.settings_file)
         run_repo = RunRepository(settings.runs_file)
+        scheduled_task_repo = ScheduledTaskRepository(settings.scheduled_tasks_file)
         user_repo = UserRepository(settings.users_file)
 
     app.state.skill_repo = skill_repo
@@ -148,9 +319,30 @@ async def lifespan(app: FastAPI):
             logger.warning("Failed to load remote skills: %s", exc)
 
     app.state.run_repo = run_repo
+    app.state.scheduled_task_repo = scheduled_task_repo
     app.state.secrets_store = SecretsStore(settings.secrets_file)
     with _runs_lock:
         _runs.update(run_repo.all_as_dict())
+    with _scheduled_tasks_lock:
+        _scheduled_tasks.clear()
+        _scheduled_tasks.update(scheduled_task_repo.all_as_dict())
+        now = datetime.now(timezone.utc)
+        for task in _scheduled_tasks.values():
+            if not task.enabled:
+                task.next_run_at = None
+                continue
+            try:
+                task.next_run_at = _compute_next_run_at(task.cron, task.timezone, now)
+            except HTTPException as exc:
+                logger.warning("Could not schedule task %s: %s", task.task_id, exc.detail)
+                task.next_run_at = None
+                task.last_error = str(exc.detail)
+            scheduled_task_repo.save(task)
+
+    global _scheduler_thread
+    _scheduler_stop_event.clear()
+    _scheduler_thread = threading.Thread(target=_scheduler_loop, args=(app,), daemon=True)
+    _scheduler_thread.start()
 
     app.state.user_repo = user_repo
     if user_repo.count() == 0 and settings.admin_password:
@@ -162,6 +354,10 @@ async def lifespan(app: FastAPI):
         logger.info("Bootstrapped admin user %r", settings.admin_username)
 
     yield
+
+    _scheduler_stop_event.set()
+    if _scheduler_thread is not None:
+        _scheduler_thread.join(timeout=2)
 
 
 app = FastAPI(title="notesllm-agent", version="0.1.0", lifespan=lifespan)
@@ -411,80 +607,13 @@ class GeneratePolicyRequest(BaseModel):
 
 @app.post("/api/agent/run", status_code=202, response_model=RunResponse)
 def start_run(request: RunRequest, req: Request, current_user: User = Depends(get_current_user)) -> RunResponse:
-    run_id = str(uuid.uuid4())
-
-    seeded_history: list = []
-    history_start_index = 0
-    seeded_overrides: dict[str, bool] = {}
-    parent_run_id: str | None = None
-    seeded_model: str | None = request.llm_model
-    history_snapshot: list = []
-    if request.context_run_id is not None:
-        with _runs_lock:
-            parent_ctx = _runs.get(request.context_run_id)
-            if parent_ctx is not None:
-                if current_user.role != "admin" and parent_ctx.owner_id != current_user.user_id:
-                    raise HTTPException(status_code=404, detail=f"Run {request.context_run_id!r} not found")
-                history_snapshot = list(parent_ctx.history)
-                seeded_overrides = dict(parent_ctx.skill_overrides)
-                parent_run_id = request.context_run_id
-                # Inherit model from parent if not explicitly set
-                if seeded_model is None:
-                    seeded_model = parent_ctx.llm_model
-        if parent_run_id is not None:
-            seeded_history = copy.deepcopy(history_snapshot)
-            history_start_index = len(seeded_history)
-
-    ctx = RunContext(
-        run_id=run_id,
+    return _start_run_internal(
         prompt=request.prompt,
-        history=seeded_history,
-        history_start_index=history_start_index,
-        skill_overrides=seeded_overrides,
-        parent_run_id=parent_run_id,
-        llm_model=seeded_model,
-        owner_id=current_user.user_id,
+        app=req.app,
+        current_user=current_user,
+        llm_model=request.llm_model,
+        context_run_id=request.context_run_id,
     )
-    skill_repo = req.app.state.skill_repo
-    remote_skill_repo = getattr(req.app.state, "remote_skill_repo", None)
-    run_repo = req.app.state.run_repo
-
-    # Resolve model: explicit request > parent context > app settings default > config default
-    if seeded_model is None:
-        app_settings_repo = getattr(req.app.state, "app_settings_repo", None)
-        app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
-        seeded_model = app_settings.default_model or settings.llm_model
-    ctx.llm_model = seeded_model
-
-    with _runs_lock:
-        _runs[run_id] = ctx
-    run_repo.save(ctx)
-
-    def _execute() -> None:
-        workflow = _build_workflow(
-            skill_repo, run_id=run_id, ctx=ctx, remote_skill_repo=remote_skill_repo,
-            secrets_store=req.app.state.secrets_store,
-            user_require_approval=current_user.require_approval,
-        )
-        with _workflows_lock:
-            _workflows[run_id] = workflow
-        try:
-            result = workflow.run(
-                prompt=request.prompt,
-                max_iterations=settings.max_iterations,
-                ctx=ctx,
-            )
-            with _runs_lock:
-                _runs[run_id] = result
-            run_repo.save(result)
-        finally:
-            with _workflows_lock:
-                _workflows.pop(run_id, None)
-
-    thread = threading.Thread(target=_execute, daemon=True)
-    thread.start()
-
-    return RunResponse(run_id=run_id, status="running")
 
 
 class SearchHit(BaseModel):
@@ -591,6 +720,192 @@ def delete_run(run_id: str, request: Request, current_user: User = Depends(get_c
             continue
 
 
+# ── Scheduled tasks ──────────────────────────────────────────────────────────
+
+
+class ScheduledTaskCreateRequest(BaseModel):
+    prompt: str
+    cron: str
+    timezone: str = "UTC"
+    enabled: bool = True
+
+
+class ScheduledTaskPatchRequest(BaseModel):
+    prompt: str | None = None
+    cron: str | None = None
+    timezone: str | None = None
+    enabled: bool | None = None
+
+
+class ScheduledTaskResponse(BaseModel):
+    task_id: str
+    owner_id: str
+    prompt: str
+    cron: str
+    timezone: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    next_run_at: datetime | None = None
+    last_run_at: datetime | None = None
+    last_run_id: str | None = None
+    last_error: str | None = None
+
+
+def _scheduled_task_response(task: ScheduledTask) -> ScheduledTaskResponse:
+    return ScheduledTaskResponse(**task.model_dump())
+
+
+@app.get("/api/scheduled-tasks", response_model=list[ScheduledTaskResponse])
+def list_scheduled_tasks(request: Request, current_user: User = Depends(get_current_user)) -> list[ScheduledTaskResponse]:
+    with _scheduled_tasks_lock:
+        tasks = list(_scheduled_tasks.values())
+    tasks = [task for task in tasks if task.owner_id == current_user.user_id]
+    return [_scheduled_task_response(task) for task in tasks]
+
+
+@app.post("/api/scheduled-tasks", status_code=201, response_model=ScheduledTaskResponse)
+def create_scheduled_task(
+    body: ScheduledTaskCreateRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> ScheduledTaskResponse:
+    tz_name = _validate_timezone(body.timezone)
+    next_run_at = _compute_next_run_at(body.cron, tz_name)
+    now = datetime.now(timezone.utc)
+
+    task = ScheduledTask(
+        task_id=str(uuid.uuid4()),
+        owner_id=current_user.user_id,
+        prompt=body.prompt,
+        cron=body.cron,
+        timezone=tz_name,
+        enabled=body.enabled,
+        created_at=now,
+        updated_at=now,
+        next_run_at=next_run_at if body.enabled else None,
+    )
+
+    with _scheduled_tasks_lock:
+        _scheduled_tasks[task.task_id] = task
+    request.app.state.scheduled_task_repo.save(task)
+    return _scheduled_task_response(task)
+
+
+@app.get("/api/scheduled-tasks/{task_id}", response_model=ScheduledTaskResponse)
+def get_scheduled_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+) -> ScheduledTaskResponse:
+    with _scheduled_tasks_lock:
+        task = _scheduled_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Scheduled task {task_id!r} not found")
+    _assert_task_access(task, current_user)
+    return _scheduled_task_response(task)
+
+
+@app.patch("/api/scheduled-tasks/{task_id}", response_model=ScheduledTaskResponse)
+def patch_scheduled_task(
+    task_id: str,
+    body: ScheduledTaskPatchRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> ScheduledTaskResponse:
+    with _scheduled_tasks_lock:
+        task = _scheduled_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Scheduled task {task_id!r} not found")
+    _assert_task_access(task, current_user)
+
+    now = datetime.now(timezone.utc)
+    prompt = task.prompt if body.prompt is None else body.prompt
+    cron_expr = task.cron if body.cron is None else body.cron
+    tz_name = task.timezone if body.timezone is None else _validate_timezone(body.timezone)
+    enabled = task.enabled if body.enabled is None else body.enabled
+
+    next_run_at = _compute_next_run_at(cron_expr, tz_name, now) if enabled else None
+
+    updated = task.model_copy(
+        update={
+            "prompt": prompt,
+            "cron": cron_expr,
+            "timezone": tz_name,
+            "enabled": enabled,
+            "next_run_at": next_run_at,
+            "updated_at": now,
+            "last_error": None,
+        }
+    )
+
+    with _scheduled_tasks_lock:
+        _scheduled_tasks[task_id] = updated
+    request.app.state.scheduled_task_repo.save(updated)
+    return _scheduled_task_response(updated)
+
+
+@app.delete("/api/scheduled-tasks/{task_id}", status_code=204)
+def delete_scheduled_task(
+    task_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> None:
+    with _scheduled_tasks_lock:
+        task = _scheduled_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Scheduled task {task_id!r} not found")
+    _assert_task_access(task, current_user)
+
+    with _scheduled_tasks_lock:
+        _scheduled_tasks.pop(task_id, None)
+    try:
+        request.app.state.scheduled_task_repo.delete(task_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Scheduled task {task_id!r} not found")
+
+
+@app.post("/api/scheduled-tasks/{task_id}/run", status_code=202, response_model=RunResponse)
+def run_scheduled_task_now(
+    task_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> RunResponse:
+    with _scheduled_tasks_lock:
+        task = _scheduled_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Scheduled task {task_id!r} not found")
+    _assert_task_access(task, current_user)
+
+    user_repo = request.app.state.user_repo
+    owner = user_repo.get(task.owner_id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail=f"Owner {task.owner_id!r} not found")
+
+    run_response = _start_run_internal(
+        prompt=task.prompt,
+        app=request.app,
+        current_user=owner,
+    )
+
+    now = datetime.now(timezone.utc)
+    with _scheduled_tasks_lock:
+        live = _scheduled_tasks.get(task_id)
+        if live is not None:
+            live.last_run_at = now
+            live.last_run_id = run_response.run_id
+            live.last_error = None
+            live.updated_at = now
+            if live.enabled:
+                try:
+                    live.next_run_at = _compute_next_run_at(live.cron, live.timezone, now)
+                except HTTPException as exc:
+                    live.next_run_at = None
+                    live.last_error = str(exc.detail)
+            request.app.state.scheduled_task_repo.save(live)
+
+    return run_response
+
+
 # ── Models ────────────────────────────────────────────────────────────────────
 
 
@@ -600,7 +915,10 @@ class ModelsResponse(BaseModel):
 
 
 @app.get("/api/models", response_model=ModelsResponse)
-def get_models(request: Request, current_user: User = Depends(get_current_user)) -> ModelsResponse:
+def get_models(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> ModelsResponse:
     app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
     app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
     default_model = app_settings.default_model or settings.llm_model
@@ -626,7 +944,21 @@ def get_models(request: Request, current_user: User = Depends(get_current_user))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to reach LLM API: {exc}") from exc
 
-    available_models = sorted(m["id"] for m in data.get("data", []) if "id" in m)
+    model_rows: list[dict] = []
+    if isinstance(data, dict):
+        if isinstance(data.get("data"), list):
+            model_rows = [m for m in data.get("data", []) if isinstance(m, dict)]
+        elif isinstance(data.get("models"), list):
+            model_rows = [m for m in data.get("models", []) if isinstance(m, dict)]
+    elif isinstance(data, list):
+        model_rows = [m for m in data if isinstance(m, dict)]
+
+    available_models = sorted({
+        str(m.get("id") or m.get("model") or "")
+        for m in model_rows
+        if (m.get("id") or m.get("model"))
+    })
+
     return ModelsResponse(
         available_models=available_models,
         default_model=default_model,
@@ -706,10 +1038,8 @@ def put_settings(body: SettingsPatchRequest, request: Request, current_user: Use
         request.app.state, "app_settings_repo", None
     )
     if app_settings_repo is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Application settings repository is unavailable",
-        )
+        app_settings_repo = AppSettingsRepository(settings.settings_file)
+        request.app.state.app_settings_repo = app_settings_repo
     app_settings = app_settings_repo.load()
     settings_changed = False
 
@@ -977,9 +1307,9 @@ class RunSkillPatchRequest(BaseModel):
 def _run_skill_response(skill, overrides: dict[str, bool]) -> RunSkillResponse:
     # Remote skills are always effectively enabled — overrides do not apply.
     if skill.source == "remote":
-        effective = True
+        effective: bool = True
     else:
-        effective = overrides.get(skill.id, skill.enabled)
+        effective = bool(overrides.get(skill.id, skill.enabled))
     return RunSkillResponse(
         id=skill.id,
         name=skill.name,

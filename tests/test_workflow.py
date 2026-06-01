@@ -1,5 +1,4 @@
 from unittest.mock import MagicMock, patch
-
 import pytest
 
 from pydantic import ValidationError
@@ -388,7 +387,6 @@ def test_api_put_settings_rejects_empty_llm_endpoint():
     client = TestClient(fastapi_app)
     response = client.put("/api/settings", json={"llm_base_url": "   "})
     assert response.status_code == 422
-
 
 def test_api_approve_unknown_run_returns_404():
     client = TestClient(fastapi_app)

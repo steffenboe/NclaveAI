@@ -7,10 +7,13 @@ from __future__ import annotations
 import pytest
 import mongomock
 
-from app.models import RunContext
+from datetime import datetime, timezone
+
+from app.models import RunContext, ScheduledTask
 from app.mongo_repos import (
     MongoAppSettingsRepository,
     MongoRunRepository,
+    MongoScheduledTaskRepository,
     MongoSkillRepository,
     MongoUserRepository,
 )
@@ -118,6 +121,50 @@ class TestMongoRunRepository:
         assert repo.get("r1").status == "failed"
         assert repo.get("r2").status == "failed"
         assert repo.get("r3").status == "done"
+
+
+# ---------------------------------------------------------------------------
+# MongoScheduledTaskRepository
+# ---------------------------------------------------------------------------
+
+class TestMongoScheduledTaskRepository:
+    def _task(self, task_id: str = "t1", owner_id: str = "u1") -> ScheduledTask:
+        now = datetime.now(timezone.utc)
+        return ScheduledTask(
+            task_id=task_id,
+            owner_id=owner_id,
+            prompt="p",
+            cron="*/5 * * * *",
+            timezone="UTC",
+            enabled=True,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def test_save_and_get(self, mongo_db):
+        repo = MongoScheduledTaskRepository(mongo_db)
+        repo.save(self._task("t1"))
+        loaded = repo.get("t1")
+        assert loaded.task_id == "t1"
+
+    def test_get_raises_key_error_when_missing(self, mongo_db):
+        repo = MongoScheduledTaskRepository(mongo_db)
+        with pytest.raises(KeyError):
+            repo.get("does-not-exist")
+
+    def test_list_filters_by_owner(self, mongo_db):
+        repo = MongoScheduledTaskRepository(mongo_db)
+        repo.save(self._task("t1", owner_id="u1"))
+        repo.save(self._task("t2", owner_id="u2"))
+        result = repo.list(owner_id="u1")
+        assert [task.task_id for task in result] == ["t1"]
+
+    def test_delete(self, mongo_db):
+        repo = MongoScheduledTaskRepository(mongo_db)
+        repo.save(self._task("t1"))
+        repo.delete("t1")
+        with pytest.raises(KeyError):
+            repo.get("t1")
 
 
 # ---------------------------------------------------------------------------

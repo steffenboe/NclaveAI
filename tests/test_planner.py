@@ -238,6 +238,42 @@ def test_generate_policy_passes_all_context_to_chain():
     assert call_kwargs["plain_description"] == "allow all gh commands"
 
 
+def test_planner_normalizes_legacy_top_level_action_payload(tmp_path, ctx_empty):
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value = (
+        '{"tool_name":"curl","argv":["-H","Authorization: Bearer ${GITLAB_TOKEN}"],'
+        '"rationale":"Call GitLab API"}'
+    )
+    planner = Planner.__new__(Planner)
+    planner._chain = mock_chain
+    planner._skill_repo = SkillRepository(tmp_path / "skills.json")
+
+    result = planner.next_action(ctx_empty)
+
+    assert result.status == "action"
+    assert result.command is not None
+    assert result.command.argv[0] == "curl"
+    assert "Authorization: Bearer ${GITLAB_TOKEN}" in result.command.argv
+
+
+def test_planner_normalizes_legacy_nested_action_payload(tmp_path, ctx_empty):
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value = (
+        '{"command":{"tool_name":"curl","argv":["https://example.com"],"reason":"read"},'
+        '"message":"next step"}'
+    )
+    planner = Planner.__new__(Planner)
+    planner._chain = mock_chain
+    planner._skill_repo = SkillRepository(tmp_path / "skills.json")
+
+    result = planner.next_action(ctx_empty)
+
+    assert result.status == "action"
+    assert result.summary == "next step"
+    assert result.command is not None
+    assert result.command.argv == ["curl", "https://example.com"]
+
+
 def test_api_generate_policy_returns_policy_string(tmp_path):
     fastapi_app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
     mock_planner = MagicMock()

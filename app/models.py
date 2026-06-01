@@ -64,3 +64,18 @@ class RunContext(BaseModel):
     skill_overrides: dict[str, bool] = {}
     llm_model: str | None = None
     owner_id: str | None = None
+
+
+class ScheduledTask(BaseModel):
+    task_id: str
+    owner_id: str
+    prompt: str
+    cron: str
+    timezone: str = "UTC"
+    enabled: bool = True
+    created_at: datetime
+    updated_at: datetime
+    next_run_at: datetime | None = None
+    last_run_at: datetime | None = None
+    last_run_id: str | None = None
+    last_error: str | None = None
