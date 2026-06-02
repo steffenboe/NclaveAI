@@ -151,8 +151,9 @@ export default function SkillsModal({ onClose }) {
   }
 
   async function saveLlmSettings() {
-    if (!llmEndpoint.trim()) { alert('LLM endpoint is required.'); return }
-    const payload = { llm_base_url: llmEndpoint.trim() }
+    const endpoint = llmEndpoint.trim()
+    if (!endpoint) { alert('LLM endpoint is required.'); return }
+    const payload = { llm_base_url: endpoint }
     if (!tokenMasked && llmToken.trim()) payload.llm_api_key = llmToken.trim()
     try {
       const res = await fetch('/api/settings', {

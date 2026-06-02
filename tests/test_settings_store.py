@@ -19,7 +19,10 @@ def test_load_returns_defaults_when_file_missing(tmp_path):
 def test_save_and_load_round_trip(tmp_path):
     path = tmp_path / "settings.json"
     repo = AppSettingsRepository(path)
-    repo.save(AppSettings(skills_repo_url="https://example.com/repo", skills_repo_branch="develop"))
+    repo.save(AppSettings(
+        skills_repo_url="https://example.com/repo",
+        skills_repo_branch="develop",
+    ))
     loaded = repo.load()
     assert loaded.skills_repo_url == "https://example.com/repo"
     assert loaded.skills_repo_branch == "develop"

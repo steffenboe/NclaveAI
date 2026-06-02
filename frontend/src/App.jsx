@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar'
 import ConversationFeed from './components/ConversationFeed'
 import ConvSkillsBar from './components/ConvSkillsBar'
 import SkillsModal from './components/SkillsModal'
+import ScheduledTasksModal from './components/ScheduledTasksModal'
 import UsersModal from './components/UsersModal'
 import { useAuth } from './AuthContext'
 import Login from './Login'
@@ -41,6 +42,7 @@ function MainApp({ user, logout }) {
   const [runOrder, setRunOrder] = useState([])
   const [selectedRootId, setSelectedRootId] = useState(null)
   const [skillsModalOpen, setSkillsModalOpen] = useState(false)
+  const [scheduledTasksModalOpen, setScheduledTasksModalOpen] = useState(false)
   const [usersModalOpen, setUsersModalOpen] = useState(false)
   const [convSkillsData, setConvSkillsData] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -116,25 +118,43 @@ function MainApp({ user, logout }) {
     } catch { setConvSkillsData([]) }
   }, [])
 
-  // Initial load — runs once on mount
-  useEffect(() => {
-    async function loadAll() {
-      try {
-        const res = await fetch('/api/agent/runs')
-        if (!res.ok) return
-        const list = await res.json()
-        const newRuns = {}
-        const newOrder = []
-        for (const r of list) {
-          newRuns[r.run_id] = r
-          newOrder.push(r.run_id)
-          if (r.status === 'running' || r.status === 'waiting_approval') {
-            pollRun(r.run_id)
+  const syncRuns = useCallback(async (initialize = false) => {
+    try {
+      const res = await fetch('/api/agent/runs')
+      if (!res.ok) return
+      const list = await res.json()
+
+      setRuns(prev => {
+        const next = { ...prev }
+        for (const run of list) next[run.run_id] = run
+        return next
+      })
+      setRunOrder(prev => {
+        const ids = new Set(prev)
+        const next = [...prev]
+        for (const run of list) {
+          if (!ids.has(run.run_id)) {
+            next.push(run.run_id)
+            ids.add(run.run_id)
           }
         }
-        setRuns(newRuns)
-        setRunOrder(newOrder)
-        const roots = newOrder.filter(id => !newRuns[id]?.parent_run_id)
+        return next
+      })
+
+      for (const run of list) {
+        if (run.status === 'running' || run.status === 'waiting_approval') {
+          pollRun(run.run_id)
+        }
+      }
+
+      if (initialize) {
+        const initialRuns = {}
+        const initialOrder = []
+        for (const run of list) {
+          initialRuns[run.run_id] = run
+          initialOrder.push(run.run_id)
+        }
+        const roots = initialOrder.filter(id => !initialRuns[id]?.parent_run_id)
         if (roots.length > 0) {
           const rootId = roots[roots.length - 1]
           setSelectedRootId(rootId)
@@ -142,17 +162,23 @@ function MainApp({ user, logout }) {
           let tailId = rootId
           while (current) {
             tailId = current
-            const next = newOrder.find(id => newRuns[id]?.parent_run_id === current) ?? null
+            const next = initialOrder.find(id => initialRuns[id]?.parent_run_id === current) ?? null
             current = next
           }
           loadConvSkills(tailId)
         } else {
           loadConvSkillsForNewChat()
         }
-      } catch {}
-    }
-    loadAll()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+      }
+    } catch {}
+  }, [pollRun, loadConvSkills, loadConvSkillsForNewChat])
+
+  // Initial load + periodic sync so scheduler-created runs appear without refresh
+  useEffect(() => {
+    syncRuns(true)
+    const intervalId = setInterval(() => { syncRuns(false) }, 3000)
+    return () => clearInterval(intervalId)
+  }, [syncRuns])
 
   const newChat = useCallback(() => {
     setSelectedRootId(null)
@@ -271,6 +297,20 @@ function MainApp({ user, logout }) {
     if (r.ok) upsertRun(await r.json())
   }, [upsertRun])
 
+  const handleScheduledRunCreated = useCallback((run) => {
+    if (!run?.run_id) return
+    upsertRun({
+      run_id: run.run_id,
+      prompt: run.prompt || 'Scheduled run',
+      status: run.status || 'running',
+      history: [],
+      history_start_index: 0,
+      parent_run_id: null,
+    })
+    setSelectedRootId(run.run_id)
+    pollRun(run.run_id)
+  }, [upsertRun, pollRun])
+
   const chain = selectedRootId ? getChain(runs, runOrder, selectedRootId) : []
   const tailRunId = chain.length > 0 ? chain[chain.length - 1] : null
   const tailRun = tailRunId ? runs[tailRunId] : null
@@ -290,6 +330,7 @@ function MainApp({ user, logout }) {
         onSearch={setSearchQuery}
         user={user}
         onLogout={logout}
+        onOpenScheduledTasksModal={() => setScheduledTasksModalOpen(true)}
         onOpenUsersModal={user?.role === 'admin' ? () => setUsersModalOpen(true) : null}
       />
       <div className="main">
@@ -317,6 +358,12 @@ function MainApp({ user, logout }) {
             loadConvSkillsForNewChat()
           }
         }} />
+      )}
+      {scheduledTasksModalOpen && (
+        <ScheduledTasksModal
+          onRunCreated={handleScheduledRunCreated}
+          onClose={() => setScheduledTasksModalOpen(false)}
+        />
       )}
       {user?.role === 'admin' && usersModalOpen && (
         <UsersModal onClose={() => setUsersModalOpen(false)} />

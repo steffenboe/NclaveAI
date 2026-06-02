@@ -25,7 +25,7 @@ def _bypass_auth_for_non_auth_tests(request):
     Tests in test_main_auth.py and test_main_rbac.py opt out of this bypass so
     they exercise the real login / cookie / JWT / RBAC flow.
     """
-    _real_auth_files = ("test_main_auth", "test_main_rbac")
+    _real_auth_files = ("test_main_auth", "test_main_rbac", "test_scheduled_tasks_api")
     if any(name in request.node.nodeid for name in _real_auth_files):
         yield
         return
@@ -57,6 +57,7 @@ def client(tmp_path):
     from app.auth import hash_password
     from app.main import app
     from app.runs import RunRepository
+    from app.scheduled_tasks import ScheduledTaskRepository
     from app.secrets_store import SecretsStore
     from app.settings_store import AppSettingsRepository
     from app.skills import SkillRepository
@@ -72,9 +73,12 @@ def client(tmp_path):
         # Clear module-level in-memory state left over from lifespan / previous tests
         with main_module._runs_lock:
             main_module._runs.clear()
+        with main_module._scheduled_tasks_lock:
+            main_module._scheduled_tasks.clear()
 
         # Replace all app.state repos with fresh, isolated tmp_path instances
         app.state.run_repo = RunRepository(tmp_path / "runs.json")
+        app.state.scheduled_task_repo = ScheduledTaskRepository(tmp_path / "scheduled_tasks.json")
         app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
         app.state.app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
         app.state.secrets_store = SecretsStore(tmp_path / "secrets.json")

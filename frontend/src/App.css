@@ -931,6 +931,38 @@ span.toggle-enabled.readonly.on { color: var(--text-muted); border-color: var(--
   background: var(--border);
 }
 
+.scheduled-tasks-modal {
+  width: 72rem;
+  max-width: 98vw;
+  max-height: 92vh;
+}
+
+.scheduled-tasks-modal .modal-body {
+  overflow-x: auto;
+}
+
+.scheduled-tasks-modal .users-table {
+  min-width: 980px;
+}
+
+.scheduled-task-prompt-input {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 0.82rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 0.4rem 0.6rem;
+}
+
+.scheduled-task-prompt-input:focus {
+  outline: none;
+  border-color: var(--border-dark);
+}
+
 .modal-error {
   color: #c0392b;
   font-size: 0.82rem;

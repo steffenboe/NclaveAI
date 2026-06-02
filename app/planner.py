@@ -142,6 +142,56 @@ def _extract_json(text: str) -> str:
     raise ValueError(f"Unbalanced braces in model output: {text!r}")
 
 
+def _normalize_planner_payload(payload: dict) -> dict:
+    """Normalize legacy LLM payloads into PlannerOutput schema.
+
+    Supported legacy/action-shaped examples:
+    - {"tool_name": "curl", "argv": [...], "rationale": "..."}
+    - {"argv": [...], "rationale": "..."}
+    - {"command": {"tool_name": "curl", "argv": [...], ...}}
+    """
+    if not isinstance(payload, dict):
+        return payload
+
+    if "status" in payload and "summary" in payload:
+        return payload
+
+    # Action shortcut: top-level tool_name/argv/rationale fields
+    if "argv" in payload or "tool_name" in payload:
+        argv = list(payload.get("argv") or [])
+        tool_name = payload.get("tool_name")
+        if tool_name and (not argv or argv[0] != tool_name):
+            argv = [tool_name, *argv]
+        rationale = payload.get("rationale") or payload.get("reason") or "Execute next step"
+        return {
+            "status": "action",
+            "summary": payload.get("summary") or payload.get("message") or "Prepared next action.",
+            "command": {
+                "argv": argv,
+                "rationale": rationale,
+            },
+        }
+
+    # Nested command shortcut
+    command = payload.get("command")
+    if isinstance(command, dict) and ("argv" in command or "tool_name" in command):
+        argv = list(command.get("argv") or [])
+        tool_name = command.get("tool_name")
+        if tool_name and (not argv or argv[0] != tool_name):
+            argv = [tool_name, *argv]
+        rationale = command.get("rationale") or command.get("reason") or "Execute next step"
+        return {
+            "status": "action",
+            "summary": payload.get("summary") or payload.get("message") or "Prepared next action.",
+            "command": {
+                "argv": argv,
+                "rationale": rationale,
+            },
+        }
+
+    return payload
+
+
 class Planner:
     def __init__(
         self,
@@ -218,7 +268,8 @@ class Planner:
         # Tests may inject a PlannerOutput directly via a mock chain
         if isinstance(raw, PlannerOutput):
             return raw
-        return PlannerOutput.model_validate(json.loads(_extract_json(raw)))
+        payload = json.loads(_extract_json(raw))
+        return PlannerOutput.model_validate(_normalize_planner_payload(payload))
 
     def summarize(self, ctx: RunContext) -> str:
         return self._summarize_chain.invoke({

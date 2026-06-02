@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from pymongo.database import Database
 
-from app.models import RunContext, User
+from app.models import RunContext, ScheduledTask, User
 from app.runs import _run_matches
 from app.settings_store import AppSettings
 from app.skills import Skill
@@ -79,6 +79,47 @@ class MongoRunRepository:
     def search(self, query: str) -> list[RunContext]:
         q = query.lower()
         return [ctx for ctx in self.list() if _run_matches(ctx, q)]
+
+
+class MongoScheduledTaskRepository:
+    """MongoDB-backed scheduled task repository."""
+
+    def __init__(self, db: Database) -> None:
+        self._col = db["scheduled_tasks"]
+
+    def _to_doc(self, task: ScheduledTask) -> dict:
+        doc = task.model_dump(mode="json")
+        doc["_id"] = task.task_id
+        return doc
+
+    def _from_doc(self, doc: dict) -> ScheduledTask:
+        d = dict(doc)
+        d.pop("_id", None)
+        return ScheduledTask.model_validate(d)
+
+    def save(self, task: ScheduledTask) -> None:
+        self._col.replace_one({"_id": task.task_id}, self._to_doc(task), upsert=True)
+
+    def list(self, owner_id: str | None = None) -> list[ScheduledTask]:
+        query = {"owner_id": owner_id} if owner_id is not None else {}
+        return [self._from_doc(d) for d in self._col.find(query)]
+
+    def get(self, task_id: str, owner_id: str | None = None) -> ScheduledTask:
+        query: dict = {"_id": task_id}
+        if owner_id is not None:
+            query["owner_id"] = owner_id
+        doc = self._col.find_one(query)
+        if doc is None:
+            raise KeyError(task_id)
+        return self._from_doc(doc)
+
+    def delete(self, task_id: str) -> None:
+        result = self._col.delete_one({"_id": task_id})
+        if result.deleted_count == 0:
+            raise KeyError(task_id)
+
+    def all_as_dict(self) -> dict[str, ScheduledTask]:
+        return {d["_id"]: self._from_doc(d) for d in self._col.find()}
 
 
 class MongoUserRepository:

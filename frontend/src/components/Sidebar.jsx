@@ -21,7 +21,7 @@ export default function Sidebar({
   runs, runOrder, selectedRootId,
   onNewChat, onSelectConversation, onDeleteConversation, onOpenSettings,
   searchQuery, searchResults, onSearch,
-  user, onLogout, onOpenUsersModal,
+  user, onLogout, onOpenScheduledTasksModal, onOpenUsersModal,
 }) {
   const roots = getRoots(runs, runOrder).slice().reverse()
   const isSearching = searchQuery.trim().length > 0
@@ -101,6 +101,9 @@ export default function Sidebar({
         {user && (
           <div className="sidebar-user">
             <span className="sidebar-username" title={user.username}>{user.username}</span>
+            {onOpenScheduledTasksModal && (
+              <button className="btn-users" onClick={onOpenScheduledTasksModal} title="Scheduled tasks">🗓</button>
+            )}
             {onOpenUsersModal && (
               <button className="btn-users" onClick={onOpenUsersModal} title="Manage users">👥</button>
             )}
