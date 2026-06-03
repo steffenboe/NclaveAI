@@ -16,8 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     ca-certificates \
     gnupg \
+    git \
     lsb-release \
     libatomic1 \
+    cmake \
+    make \
+    g++ \
+    libssl-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
@@ -27,6 +32,5 @@ COPY app/ ./app/
 # Overwrite static dir with the production React build from Stage 1
 # (Vite outDir: '../app/static' relative to /frontend → /app/static in Stage 1)
 COPY --from=frontend-builder /app/static ./app/static
-COPY policies/ ./policies/
 
 CMD ["sh", "/etc/agent/entrypoint.sh"]
