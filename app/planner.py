@@ -24,7 +24,7 @@ Rules:
 Your response must be a JSON object with these fields:
   - status: "action" | "done" | "failed"
   - summary: one sentence explaining your decision
-  - command: {{ argv: [...], rationale: "..." }}  — required when status is "action", omit otherwise
+  - command: {"argv": [...], "rationale": "..."}  — required when status is "action", omit otherwise
 """
 
 _HUMAN_PROMPT = """\
@@ -142,54 +142,7 @@ def _extract_json(text: str) -> str:
     raise ValueError(f"Unbalanced braces in model output: {text!r}")
 
 
-def _normalize_planner_payload(payload: dict) -> dict:
-    """Normalize legacy LLM payloads into PlannerOutput schema.
 
-    Supported legacy/action-shaped examples:
-    - {"tool_name": "curl", "argv": [...], "rationale": "..."}
-    - {"argv": [...], "rationale": "..."}
-    - {"command": {"tool_name": "curl", "argv": [...], ...}}
-    """
-    if not isinstance(payload, dict):
-        return payload
-
-    if "status" in payload and "summary" in payload:
-        return payload
-
-    # Action shortcut: top-level tool_name/argv/rationale fields
-    if "argv" in payload or "tool_name" in payload:
-        argv = list(payload.get("argv") or [])
-        tool_name = payload.get("tool_name")
-        if tool_name and (not argv or argv[0] != tool_name):
-            argv = [tool_name, *argv]
-        rationale = payload.get("rationale") or payload.get("reason") or "Execute next step"
-        return {
-            "status": "action",
-            "summary": payload.get("summary") or payload.get("message") or "Prepared next action.",
-            "command": {
-                "argv": argv,
-                "rationale": rationale,
-            },
-        }
-
-    # Nested command shortcut
-    command = payload.get("command")
-    if isinstance(command, dict) and ("argv" in command or "tool_name" in command):
-        argv = list(command.get("argv") or [])
-        tool_name = command.get("tool_name")
-        if tool_name and (not argv or argv[0] != tool_name):
-            argv = [tool_name, *argv]
-        rationale = command.get("rationale") or command.get("reason") or "Execute next step"
-        return {
-            "status": "action",
-            "summary": payload.get("summary") or payload.get("message") or "Prepared next action.",
-            "command": {
-                "argv": argv,
-                "rationale": rationale,
-            },
-        }
-
-    return payload
 
 
 class Planner:
@@ -260,16 +213,53 @@ class Planner:
         )
 
     def next_action(self, ctx: RunContext) -> PlannerOutput:
-        raw = self._chain.invoke({
+        invoke_kwargs = {
             "system_prompt": self._build_system_prompt(),
             "prompt": ctx.prompt,
             "history_str": _format_history(ctx.history),
-        })
-        # Tests may inject a PlannerOutput directly via a mock chain
-        if isinstance(raw, PlannerOutput):
-            return raw
-        payload = json.loads(_extract_json(raw))
-        return PlannerOutput.model_validate(_normalize_planner_payload(payload))
+        }
+        last_exc: Exception | None = None
+        for _attempt in range(3):
+            raw = self._chain.invoke(invoke_kwargs)
+            # Tests may inject a PlannerOutput directly via a mock chain
+            if isinstance(raw, PlannerOutput):
+                return raw
+            try:
+                json_str = _extract_json(raw)
+            except ValueError as exc:
+                last_exc = exc
+                invoke_kwargs["history_str"] += (
+                    f"\n\nSYSTEM: Your previous response was not valid JSON. Error: {exc}. "
+                    "Please respond with a JSON object containing status, summary, and optionally command."
+                )
+                continue
+            try:
+                payload = json.loads(json_str)
+            except json.JSONDecodeError:
+                import ast
+                try:
+                    payload = ast.literal_eval(json_str)
+                except (ValueError, SyntaxError) as ast_exc:
+                    last_exc = ValueError(
+                        f"Could not parse model output as JSON or Python literal: {json_str!r}"
+                    )
+                    last_exc.__cause__ = ast_exc
+                    invoke_kwargs["history_str"] += (
+                        f"\n\nSYSTEM: Your previous response was not parseable JSON. "
+                        "Please respond with a JSON object containing status, summary, and optionally command."
+                    )
+                    continue
+            try:
+                return PlannerOutput.model_validate(payload)
+            except Exception as exc:
+                last_exc = exc
+                invoke_kwargs["history_str"] += (
+                    f"\n\nSYSTEM: Your previous JSON response did not match the schema. Error: {exc}. "
+                    "Required fields: status ('action'|'done'|'failed'), summary (string), "
+                    "and command (object with argv and rationale) when status is 'action'."
+                )
+                continue
+        raise last_exc  # type: ignore[misc]
 
     def summarize(self, ctx: RunContext) -> str:
         return self._summarize_chain.invoke({

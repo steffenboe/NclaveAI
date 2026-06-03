@@ -8,6 +8,7 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
   const [submitting, setSubmitting] = useState(false)
   const [aborting, setAborting] = useState(false)
   const feedRef = useRef(null)
+  const isAtBottom = useRef(true)
 
   const tailStatus = tailRun?.status
   const isRunning = tailStatus === 'running' || tailStatus === 'waiting_approval'
@@ -18,9 +19,20 @@ export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDe
   else if (tailStatus === 'running' || submitting) placeholder = 'Agent is working\u2026'
   else if (chain.length > 0) placeholder = 'Continue this chat\u2026'
 
-  // Scroll to bottom whenever conversation updates
+  // Track whether the user is scrolled to the exact bottom
   useEffect(() => {
-    if (feedRef.current) {
+    const el = feedRef.current
+    if (!el) return
+    const handleScroll = () => {
+      isAtBottom.current = el.scrollHeight - el.scrollTop === el.clientHeight
+    }
+    el.addEventListener('scroll', handleScroll)
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Only auto-scroll if the user is at the bottom
+  useEffect(() => {
+    if (feedRef.current && isAtBottom.current) {
       feedRef.current.scrollTop = feedRef.current.scrollHeight
     }
   }, [runs, chain])
