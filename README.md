@@ -8,6 +8,8 @@
 
 **From personal automation to governed agent infrastructure**
 
+→ [Slide deck (docs/slides.md)](docs/slides.md) — Marp-compatible, render with `npx @marp-team/marp-cli docs/slides.md --html`
+
 ---
 
 ## Table of contents
