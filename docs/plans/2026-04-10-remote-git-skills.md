@@ -343,7 +343,7 @@ class RemoteSkillRepository:
         self._branch = branch
         if cache_dir is None:
             url_hash = hashlib.md5(repo_url.encode()).hexdigest()[:12]
-            cache_dir = Path("/tmp") / f"llm-opa-agent-skills-{url_hash}"
+            cache_dir = Path("/tmp") / f"NclaveOS-skills-{url_hash}"
         self._cache_dir = Path(cache_dir)
         self._skills: list[Skill] = []
 

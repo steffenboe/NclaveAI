@@ -7,7 +7,7 @@
 
 ## Overview
 
-Transform `llm-opa-agent` from a Kubernetes-deployed operations agent into a **personal developer companion** that runs locally on the developer's machine.
+Transform `NclaveOS` from a Kubernetes-deployed operations agent into a **personal developer companion** that runs locally on the developer's machine.
 
 The agent gains an extensible skill repository: a managed collection of CLI tool descriptors that tell the LLM which tools are available and how to invoke them. The developer interacts through the existing browser UI, manages skills through a new Skills page, and limits what the agent may do via an OPA Rego policy.
 

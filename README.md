@@ -1,4 +1,4 @@
-# llm-opa-agent
+# NclaveOS: An Agentic Operating System
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -8,7 +8,7 @@
 
 **From personal automation to governed agent infrastructure**
 
-→ [Slide deck (docs/slides.md)](docs/slides.md) — Marp-compatible, render with `npx @marp-team/marp-cli docs/slides.md --html`
+→ [Slide deck (docs/slides.pdf)](docs/slides.pdf)`
 
 ---
 
@@ -29,9 +29,9 @@
 
 ## What it is
 
-`llm-opa-agent` is a self-hosted platform that lets users drive CLI tools and infrastructure through natural language — with every generated command evaluated against an [Open Policy Agent](https://www.openpolicyagent.org/) (OPA) policy before it is executed.
+`NclaveOS` is a self-hosted platform that lets users drive CLI tools and infrastructure through natural language — with every generated command evaluated against an [Open Policy Agent](https://www.openpolicyagent.org/) (OPA) policy before it is executed.
 
-Unlike personal AI assistants, agents in `llm-opa-agent` are **centrally governed**: what tools exist, which commands are permitted, and which secrets can be used are all defined by administrators and enforced at the platform level — not left to individual users to configure on their machines.
+Unlike personal AI assistants, agents in `NclaveOS` are **centrally governed**: what tools exist, which commands are permitted, and which secrets can be used are all defined by administrators and enforced at the platform level — not left to individual users to configure on their machines.
 
 You describe a goal in plain text. The agent plans a sequence of commands, executes them one by one, observes the results, and repeats until the goal is reached or the policy blocks the next step. Everything is accessible through a browser UI with multi-user support, role-based access control, per-skill secret injection, and a full audit trail of every command ever run.
 
@@ -50,13 +50,13 @@ Personal AI tools are powerful, but they are designed for one person on one mach
 
 …you need infrastructure, not just a local assistant.
 
-`llm-opa-agent` fills that gap: a governed, auditable, multi-user agent platform that you control and host yourself.
+`NclaveOS` fills that gap: a governed, auditable, multi-user agent platform that you control and host yourself.
 
 ---
 
 ## How it differs from local agent tools
 
-| Capability | Claude Desktop / local MCP | llm-opa-agent |
+| Capability | Claude Desktop / local MCP | NclaveOS |
 |---|---|---|
 | Multi-user with roles | ✗ | ✓ admin + user roles |
 | Policy-gated execution | ✗ | ✓ OPA Rego, per-skill |
@@ -132,35 +132,39 @@ When enabled (per-user or globally by an admin), the agent pauses before executi
 
 | Requirement | Notes |
 |---|---|
-| Python 3.12+ | |
+| Docker + Docker Compose | |
 | OpenAI-compatible LLM endpoint | OpenAI, Azure OpenAI, [Ollama](https://ollama.com/), etc. |
-| CLI tools you want to use | Install them with `brew`, `apt`, etc. |
+| CLI tools you want to use | Must be available inside the container or mounted in |
 
 ### Installation
 
 ```sh
-git clone <repo-url>
-cd llm-opa-agent
-
-pip install -e ".[dev]"
-
-cp .env.example .env
-# Set LLM_BASE_URL, LLM_API_KEY, POLICY_PATH, ADMIN_PASSWORD
+git clone git@github.com:EXXETA/nclaveos.git
+cd nclaveos
 ```
 
-### Start the server
+Edit `docker-compose.yml` and set at minimum:
+
+| Variable | Description |
+|---|---|
+| `ADMIN_PASSWORD` | Initial admin password — change this |
+| `JWT_SECRET` | Secret for signing JWTs — change this |
+
+Secrets (API keys injected into agent commands) go into `secrets.json`:
 
 ```sh
-# Create a permissive dev policy (⚠ do not use in production)
-echo 'package ops.agent\ndefault allow = true' > /tmp/dev-policy.rego
-echo 'POLICY_PATH=/tmp/dev-policy.rego' >> .env
-
-uvicorn app.main:app --reload --port 8081
+echo '{}' > secrets.json   # start empty; add entries via the UI later
 ```
 
-Open [http://localhost:8081](http://localhost:8081) and log in with the admin credentials from `.env`.
+### Start
 
-### Nix / NixOS
+```sh
+docker compose up -d
+```
+
+Open [http://localhost:8081](http://localhost:8081) and log in with the admin credentials you set in `docker-compose.yml`.
+
+### Nix / NixOS (local development without Docker)
 
 ```sh
 nix develop    # sets up Python 3.12, uv, Node 22, and LD_LIBRARY_PATH for regopy

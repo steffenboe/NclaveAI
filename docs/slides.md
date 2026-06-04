@@ -6,20 +6,25 @@ style: |
   section {
     font-family: system-ui, sans-serif;
     font-size: 1.35rem;
+    color: #111;
   }
-  h1 { color: #1a1a2e; }
-  h2 { color: #16213e; border-bottom: 2px solid #e94560; padding-bottom: 0.2em; }
+  h1 { color: #000; }
+  h2 { color: #000; border-bottom: 2px solid #000; padding-bottom: 0.2em; }
   table { font-size: 1.1rem; width: 100%; }
   code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1rem; }
-  .pill { display: inline-block; background: #e94560; color: white; border-radius: 1em;
+  .cols-vcenter { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1rem; align-items: center; }
+  .pill { display: inline-block; background: #111; color: #fff; border-radius: 1em;
           padding: 0.25em 0.8em; margin: 0.2em; font-size: 1.1rem; }
-  blockquote { border-left: 4px solid #e94560; padding-left: 1em; color: #444; font-style: italic; }
+  blockquote { border-left: 4px solid #111; padding-left: 1em; color: #444; font-style: italic; }
   .center-table { display: flex; justify-content: center; }
   .center-table table { width: auto; }
+  a { color: #000; }
+  strong { color: #000; }
 ---
 
-# llm-opa-agent
+# NclaveOS Agentic Operating System
+*An Early-Access Open Source Project Made by Exxeta*
 
 > KI-Agenten für Teams — governed, auditierbar, self-hosted
 
@@ -51,7 +56,7 @@ Was hat der Agent auf Prod gemacht? Weiß keiner.
 <div>
 
 ### Secrets im Prompt
-API-Keys landen im LLM-Kontext, in Logs, auf jedem Rechner.
+API-Keys landen im LLM-Kontext, in Logs, in der Bash-History.
 
 ### Kein Gate
 Der Agent kann Prod-Ressourcen löschen — nichts hält ihn auf.
@@ -61,11 +66,36 @@ Der Agent kann Prod-Ressourcen löschen — nichts hält ihn auf.
 
 ---
 
+## Introducing: NclaveOS Agentic Operating System 
+*From personal automation to governed agent infrastructure*
+<div class="cols-vcenter">
+<div>
+
+![w:580](image.png)
+
+</div>
+<div>
+
+- **zentral gehostetes** Agenten-Management
+- Agenten planen und führen Commands aus
+- Skills und Systemzugriffe zentral verwaltet
+- deterministische Guardrails zentral konfigurierbar
+- opt. Approval-Gate vor Commands
+- Audit Trails
+- Cron-Jobs
+- [...] 
+
+</div>
+</div>
+
+---
+
 ## Lokaler Assistent vs. governed Platform
+
 
 <div class="center-table">
 
-| Fähigkeit | Claude Desktop / MCP | llm-opa-agent |
+| Fähigkeit | Claude Desktop / MCP | nclaveOS |
 |---|:---:|:---:|
 | Multi-User mit Rollen | ✗ | ✓ |
 | Policy-gated Execution | ✗ | ✓ OPA Rego |
@@ -233,4 +263,4 @@ docker compose up -d
 
 <br>
 
-> MIT License · © 2026 Exxeta AG · `github.com/exxeta/llm-opa-agent`
+> MIT License · © 2026 Exxeta AG · `github.com/exxeta/nclaveos`

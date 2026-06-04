@@ -65,7 +65,7 @@ RemoteSkillRepository
 3. Glob `<cache_dir>/*.yaml`, parse each file, return `list[Skill]`
 4. Subprocess errors → raise `RuntimeError` with message
 
-`cache_dir` defaults to a stable temp path derived from the repo URL (e.g. `/tmp/llm-opa-agent-skills/<url-hash>`).
+`cache_dir` defaults to a stable temp path derived from the repo URL (e.g. `/tmp/NclaveOS-skills/<url-hash>`).
 
 Remote skills carry a `source = "remote"` field (added to `Skill` model, not persisted in `skills.json`) to allow the API/UI to distinguish them.
 

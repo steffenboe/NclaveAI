@@ -14,7 +14,7 @@ services:
 
       # Persist data in MongoDB
       MONGODB_URI: "mongodb://mongo:27017"
-      MONGODB_DB_NAME: "llm-opa-agent"
+      MONGODB_DB_NAME: "nclaveos"
     volumes:
       - ./secrets.json:/app/secrets.json
     depends_on:

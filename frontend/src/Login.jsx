@@ -33,7 +33,7 @@ export default function Login() {
   return (
     <div className="login-container">
       <div className="login-card">
-        <h1 className="login-title">llm-opa-agent</h1>
+        <h1 className="login-title">NclaveOS</h1>
         <form onSubmit={handleSubmit} className="login-form">
           <div className="login-field">
             <label htmlFor="username">Username</label>

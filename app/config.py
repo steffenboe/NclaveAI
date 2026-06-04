@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     mongodb_uri: str | None = None
 
-    mongodb_db_name: str = "llm-opa-agent"
+    mongodb_db_name: str = "nclaveos"
 
 
 settings = Settings()
