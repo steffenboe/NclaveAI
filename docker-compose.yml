@@ -1,0 +1,31 @@
+services:
+  agent:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8081
+    ports:
+      - "8081:8081"
+    environment:
+      # Admin credentials — required
+      ADMIN_USERNAME: "admin"
+      ADMIN_PASSWORD: "changeme"
+
+      # replace me openssl rand -hex 32
+      JWT_SECRET: "eb7a555e809c224375425228a844465ee3f309b1286d4cf7790297c68fbac874"
+
+      # Persist data in MongoDB
+      MONGODB_URI: "mongodb://mongo:27017"
+      MONGODB_DB_NAME: "nclaveos"
+    volumes:
+      - ./secrets.json:/app/secrets.json
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo-data:

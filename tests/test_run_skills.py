@@ -1,0 +1,211 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app, _runs, _runs_lock
+from app.models import RunContext
+from app.runs import RunRepository
+from app.skills import RemoteSkillRepository, Skill, SkillRepository
+
+
+@pytest.fixture(autouse=True)
+def clear_runs():
+    """Ensure _runs is empty before each test."""
+    with _runs_lock:
+        _runs.clear()
+    yield
+    with _runs_lock:
+        _runs.clear()
+
+
+@pytest.fixture
+def client(tmp_path):
+    repo = SkillRepository(tmp_path / "skills.json")
+    app.state.skill_repo = repo
+    app.state.run_repo = RunRepository(tmp_path / "runs.json")
+    app.state.remote_skill_repo = None
+    return TestClient(app)
+
+
+@pytest.fixture
+def skill_and_run(client):
+    """Create one skill and one run, returning (skill_id, run_id)."""
+    skill_res = client.post("/api/skills", json={"name": "kubectl", "description": "k8s cli"})
+    assert skill_res.status_code == 201
+    skill_id = skill_res.json()["id"]
+
+    ctx = RunContext(run_id="test-run-1", prompt="hello")
+    with _runs_lock:
+        _runs["test-run-1"] = ctx
+
+    return skill_id, "test-run-1"
+
+
+# ── GET /api/agent/runs/{run_id}/skills ───────────────────────────────────────
+
+def test_get_run_skills_returns_skill_list(client, skill_and_run):
+    skill_id, run_id = skill_and_run
+    res = client.get(f"/api/agent/runs/{run_id}/skills")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) == 1
+    assert data[0]["id"] == skill_id
+    assert data[0]["name"] == "kubectl"
+
+
+def test_get_run_skills_includes_effective_enabled(client, skill_and_run):
+    skill_id, run_id = skill_and_run
+    res = client.get(f"/api/agent/runs/{run_id}/skills")
+    assert res.status_code == 200
+    item = res.json()[0]
+    assert "effective_enabled" in item
+    assert item["effective_enabled"] == item["enabled"]  # no override yet
+
+
+def test_get_run_skills_reflects_override(client, skill_and_run):
+    skill_id, run_id = skill_and_run
+    # Apply override
+    patch_res = client.patch(
+        f"/api/agent/runs/{run_id}/skills/{skill_id}",
+        json={"enabled": False},
+    )
+    assert patch_res.status_code == 200
+    # Now GET should show effective_enabled=False even though global enabled=True
+    res = client.get(f"/api/agent/runs/{run_id}/skills")
+    assert res.status_code == 200
+    item = res.json()[0]
+    assert item["enabled"] is True          # global unchanged
+    assert item["effective_enabled"] is False  # override applied
+
+
+def test_get_run_skills_404_for_unknown_run(client):
+    res = client.get("/api/agent/runs/nonexistent-run/skills")
+    assert res.status_code == 404
+
+
+# ── PATCH /api/agent/runs/{run_id}/skills/{skill_id} ─────────────────────────
+
+def test_patch_run_skill_sets_override(client, skill_and_run):
+    skill_id, run_id = skill_and_run
+    res = client.patch(
+        f"/api/agent/runs/{run_id}/skills/{skill_id}",
+        json={"enabled": False},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["id"] == skill_id
+    assert data["effective_enabled"] is False
+    assert data["enabled"] is True  # global unchanged
+
+
+def test_patch_run_skill_override_enables_disabled_skill(client, tmp_path):
+    """Globally disabled skill can be enabled per-run."""
+    repo = SkillRepository(tmp_path / "skills2.json")
+    app.state.skill_repo = repo
+    app.state.run_repo = RunRepository(tmp_path / "runs2.json")
+    c = TestClient(app)
+
+    skill_res = c.post("/api/skills", json={"name": "gh", "description": "GitHub CLI", "enabled": False})
+    skill_id = skill_res.json()["id"]
+
+    ctx = RunContext(run_id="run-2", prompt="test")
+    with _runs_lock:
+        _runs["run-2"] = ctx
+
+    res = c.patch(f"/api/agent/runs/run-2/skills/{skill_id}", json={"enabled": True})
+    assert res.status_code == 200
+    assert res.json()["effective_enabled"] is True
+    assert res.json()["enabled"] is False  # global still False
+
+
+def test_patch_run_skill_404_for_unknown_run(client, skill_and_run):
+    skill_id, _ = skill_and_run
+    res = client.patch(f"/api/agent/runs/no-such-run/skills/{skill_id}", json={"enabled": False})
+    assert res.status_code == 404
+
+
+def test_patch_run_skill_404_for_unknown_skill(client, skill_and_run):
+    _, run_id = skill_and_run
+    res = client.patch(f"/api/agent/runs/{run_id}/skills/no-such-skill", json={"enabled": False})
+    assert res.status_code == 404
+
+
+def test_patch_run_skill_persists_in_run_context(client, skill_and_run):
+    skill_id, run_id = skill_and_run
+    client.patch(f"/api/agent/runs/{run_id}/skills/{skill_id}", json={"enabled": False})
+    with _runs_lock:
+        ctx = _runs[run_id]
+    assert ctx.skill_overrides[skill_id] is False
+
+
+@pytest.fixture
+def client_with_remote_skill(tmp_path):
+    repo = SkillRepository(tmp_path / "skills.json")
+    app.state.skill_repo = repo
+    app.state.run_repo = RunRepository(tmp_path / "runs.json")
+
+    remote_repo = MagicMock(spec=RemoteSkillRepository)
+    remote_repo.list_skills.return_value = [
+        Skill(
+            id="remote-skill-1",
+            name="kubectl-readonly",
+            description="Remote kubectl skill",
+            enabled=True,
+            policy=None,
+            created_at=datetime.now(timezone.utc),
+            source="remote",
+        )
+    ]
+    app.state.remote_skill_repo = remote_repo
+    yield TestClient(app)
+    app.state.remote_skill_repo = None
+
+
+def test_get_run_skills_includes_remote_skills(client_with_remote_skill):
+    ctx = RunContext(run_id="remote-run", prompt="hello")
+    with _runs_lock:
+        _runs[ctx.run_id] = ctx
+
+    res = client_with_remote_skill.get("/api/agent/runs/remote-run/skills")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert len(data) == 1
+    assert data[0]["id"] == "remote-skill-1"
+    assert data[0]["source"] == "remote"
+    assert data[0]["effective_enabled"] is True
+
+
+def test_patch_run_skill_rejects_override_for_remote_skill(client_with_remote_skill):
+    ctx = RunContext(run_id="remote-run", prompt="hello")
+    with _runs_lock:
+        _runs[ctx.run_id] = ctx
+
+    res = client_with_remote_skill.patch(
+        "/api/agent/runs/remote-run/skills/remote-skill-1",
+        json={"enabled": False},
+    )
+    assert res.status_code == 403
+    assert "cannot be deactivated" in res.json()["detail"]
+
+    # Override must NOT have been stored
+    with _runs_lock:
+        assert "remote-skill-1" not in _runs["remote-run"].skill_overrides
+
+
+def test_remote_skill_effective_enabled_always_true(client_with_remote_skill):
+    """Remote skills report effective_enabled=True even if stale overrides exist."""
+    ctx = RunContext(run_id="remote-run", prompt="hello")
+    # Simulate a stale override (e.g. from before this enforcement was added)
+    ctx.skill_overrides["remote-skill-1"] = False
+    with _runs_lock:
+        _runs[ctx.run_id] = ctx
+
+    res = client_with_remote_skill.get("/api/agent/runs/remote-run/skills")
+    assert res.status_code == 200
+    remote_item = next(s for s in res.json() if s["id"] == "remote-skill-1")
+    assert remote_item["effective_enabled"] is True

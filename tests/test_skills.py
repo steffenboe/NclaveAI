@@ -1,0 +1,579 @@
+from __future__ import annotations
+
+import json
+import logging
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.skills import Skill, SkillRepository
+
+
+@pytest.fixture
+def skills_file(tmp_path):
+    return tmp_path / "skills.json"
+
+
+@pytest.fixture
+def repo(skills_file):
+    return SkillRepository(skills_file)
+
+
+# ── Startup behaviour ─────────────────────────────────────────────────────────
+
+def test_starts_empty_when_file_missing(skills_file):
+    repo = SkillRepository(skills_file)
+    assert repo.list() == []
+
+
+def test_missing_file_logs_warning(skills_file, caplog):
+    with caplog.at_level(logging.WARNING, logger="app.skills"):
+        SkillRepository(skills_file)
+    assert "skills.json" in caplog.text.lower() or "skills" in caplog.text.lower()
+
+
+def test_corrupt_file_raises_value_error(tmp_path):
+    bad = tmp_path / "skills.json"
+    bad.write_text("not json {{{")
+    with pytest.raises(ValueError, match="not valid JSON"):
+        SkillRepository(bad)
+
+
+# ── create ────────────────────────────────────────────────────────────────────
+
+def test_create_returns_skill_with_all_fields(repo):
+    skill = repo.create(name="kubectl", description="Kubernetes CLI")
+    assert skill.name == "kubectl"
+    assert skill.description == "Kubernetes CLI"
+    assert skill.enabled is True
+    assert skill.id != ""
+    assert skill.created_at is not None
+
+
+def test_create_enabled_false(repo):
+    skill = repo.create(name="gh", description="GitHub CLI", enabled=False)
+    assert skill.enabled is False
+
+
+def test_create_persists_to_file(repo, skills_file):
+    repo.create(name="gh", description="GitHub CLI")
+    data = json.loads(skills_file.read_text())
+    assert len(data) == 1
+    assert data[0]["name"] == "gh"
+
+
+# ── list ──────────────────────────────────────────────────────────────────────
+
+def test_list_returns_in_insertion_order(repo):
+    repo.create(name="a", description="first")
+    repo.create(name="b", description="second")
+    names = [s.name for s in repo.list()]
+    assert names == ["a", "b"]
+
+
+def test_list_returns_copy(repo):
+    repo.create(name="gh", description="desc")
+    lst = repo.list()
+    lst.clear()
+    assert len(repo.list()) == 1  # original unaffected
+
+
+# ── get ───────────────────────────────────────────────────────────────────────
+
+def test_get_returns_skill(repo):
+    skill = repo.create(name="terraform", description="IaC tool")
+    fetched = repo.get(skill.id)
+    assert fetched.id == skill.id
+    assert fetched.name == "terraform"
+
+
+def test_get_unknown_id_raises_key_error(repo):
+    with pytest.raises(KeyError):
+        repo.get("nonexistent-id")
+
+
+# ── update ────────────────────────────────────────────────────────────────────
+
+def test_update_name(repo):
+    skill = repo.create(name="old", description="desc")
+    updated = repo.update(skill.id, name="new")
+    assert updated.name == "new"
+    assert updated.description == "desc"  # unchanged
+
+
+def test_update_description(repo):
+    skill = repo.create(name="gh", description="old desc")
+    updated = repo.update(skill.id, description="new desc")
+    assert updated.description == "new desc"
+    assert updated.name == "gh"  # unchanged
+
+
+def test_update_enabled(repo):
+    skill = repo.create(name="gh", description="desc", enabled=True)
+    updated = repo.update(skill.id, enabled=False)
+    assert updated.enabled is False
+
+
+def test_update_does_not_mutate_id_or_created_at(repo):
+    skill = repo.create(name="gh", description="desc")
+    original_id = skill.id
+    original_created_at = skill.created_at
+    updated = repo.update(skill.id, name="renamed")
+    assert updated.id == original_id
+    assert updated.created_at == original_created_at
+
+
+def test_update_persists_to_file(repo, skills_file):
+    skill = repo.create(name="gh", description="desc")
+    repo.update(skill.id, name="gh-cli")
+    data = json.loads(skills_file.read_text())
+    assert data[0]["name"] == "gh-cli"
+
+
+def test_update_unknown_id_raises_key_error(repo):
+    with pytest.raises(KeyError):
+        repo.update("nonexistent", name="x")
+
+
+def test_update_partial_only_changes_supplied_fields(repo):
+    skill = repo.create(name="gh", description="desc", enabled=True)
+    repo.update(skill.id, enabled=False)
+    updated = repo.get(skill.id)
+    assert updated.name == "gh"       # untouched
+    assert updated.description == "desc"  # untouched
+    assert updated.enabled is False
+
+
+# ── delete ────────────────────────────────────────────────────────────────────
+
+def test_delete_removes_skill(repo):
+    skill = repo.create(name="gh", description="desc")
+    repo.delete(skill.id)
+    assert repo.list() == []
+
+
+def test_delete_persists_to_file(repo, skills_file):
+    skill = repo.create(name="gh", description="desc")
+    repo.delete(skill.id)
+    data = json.loads(skills_file.read_text())
+    assert data == []
+
+
+def test_delete_unknown_id_raises_key_error(repo):
+    with pytest.raises(KeyError):
+        repo.delete("nonexistent")
+
+
+# ── JSON round-trip ───────────────────────────────────────────────────────────
+
+def test_json_round_trip_preserves_all_fields(tmp_path):
+    path = tmp_path / "skills.json"
+    repo1 = SkillRepository(path)
+    s = repo1.create(name="kubectl", description="k8s cli", enabled=False)
+
+    repo2 = SkillRepository(path)
+    loaded = repo2.get(s.id)
+    assert loaded.name == "kubectl"
+    assert loaded.description == "k8s cli"
+    assert loaded.enabled is False
+    assert loaded.created_at == s.created_at
+
+
+# ── API endpoint tests ────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def client(tmp_path):
+    repo = SkillRepository(tmp_path / "skills.json")
+    app.state.skill_repo = repo
+    app.state.remote_skill_repo = None
+    return TestClient(app)
+
+
+def test_api_list_skills_empty(client):
+    res = client.get("/api/skills")
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_api_create_skill(client):
+    res = client.post("/api/skills", json={"name": "kubectl", "description": "k8s cli"})
+    assert res.status_code == 201
+    data = res.json()
+    assert data["name"] == "kubectl"
+    assert data["enabled"] is True
+    assert "id" in data
+
+
+def test_api_create_skill_enabled_false(client):
+    res = client.post("/api/skills", json={"name": "gh", "description": "GitHub CLI", "enabled": False})
+    assert res.status_code == 201
+    assert res.json()["enabled"] is False
+
+
+def test_api_create_skill_missing_name_returns_422(client):
+    res = client.post("/api/skills", json={"description": "no name"})
+    assert res.status_code == 422
+
+
+def test_api_get_skill(client):
+    created = client.post("/api/skills", json={"name": "gh", "description": "desc"}).json()
+    res = client.get(f"/api/skills/{created['id']}")
+    assert res.status_code == 200
+    assert res.json()["id"] == created["id"]
+
+
+def test_api_get_skill_not_found(client):
+    res = client.get("/api/skills/nonexistent-id")
+    assert res.status_code == 404
+
+
+def test_api_patch_skill_name(client):
+    created = client.post("/api/skills", json={"name": "old", "description": "desc"}).json()
+    res = client.patch(f"/api/skills/{created['id']}", json={"name": "new"})
+    assert res.status_code == 200
+    assert res.json()["name"] == "new"
+    assert res.json()["description"] == "desc"  # unchanged
+
+
+def test_api_patch_skill_enabled(client):
+    created = client.post("/api/skills", json={"name": "gh", "description": "desc"}).json()
+    res = client.patch(f"/api/skills/{created['id']}", json={"enabled": False})
+    assert res.status_code == 200
+    assert res.json()["enabled"] is False
+
+
+def test_api_patch_skill_not_found(client):
+    res = client.patch("/api/skills/nonexistent-id", json={"name": "x"})
+    assert res.status_code == 404
+
+
+def test_api_delete_skill(client):
+    created = client.post("/api/skills", json={"name": "gh", "description": "desc"}).json()
+    res = client.delete(f"/api/skills/{created['id']}")
+    assert res.status_code == 204
+    assert client.get("/api/skills").json() == []
+
+
+def test_api_delete_skill_not_found(client):
+    res = client.delete("/api/skills/nonexistent-id")
+    assert res.status_code == 404
+
+
+def test_api_list_reflects_created_skills(client):
+    client.post("/api/skills", json={"name": "a", "description": "first"})
+    client.post("/api/skills", json={"name": "b", "description": "second"})
+    names = [s["name"] for s in client.get("/api/skills").json()]
+    assert names == ["a", "b"]
+
+
+# ── policy field ───────────────────────────────────────────────────────────────
+
+def test_create_with_policy(repo):
+    skill = repo.create(name="kubectl", description="k8s cli", policy='allow {\n  input.argv[0] == "kubectl"\n}')
+    assert skill.policy == 'allow {\n  input.argv[0] == "kubectl"\n}'
+
+
+def test_create_without_policy_defaults_to_none(repo):
+    skill = repo.create(name="gh", description="GitHub CLI")
+    assert skill.policy is None
+
+
+def test_update_policy(repo):
+    skill = repo.create(name="gh", description="desc")
+    updated = repo.update(skill.id, policy='allow { true }')
+    assert updated.policy == 'allow { true }'
+
+
+def test_clear_policy_to_none(repo):
+    skill = repo.create(name="gh", description="desc", policy='allow { true }')
+    updated = repo.update(skill.id, policy=None)
+    assert updated.policy is None
+
+
+def test_update_omitting_policy_leaves_it_unchanged(repo):
+    skill = repo.create(name="gh", description="desc", policy='allow { true }')
+    updated = repo.update(skill.id, name="gh-cli")
+    assert updated.policy == 'allow { true }'
+
+
+def test_policy_round_trip(tmp_path):
+    path = tmp_path / "skills.json"
+    repo1 = SkillRepository(path)
+    s = repo1.create(name="kubectl", description="k8s cli", policy='allow { true }')
+
+    repo2 = SkillRepository(path)
+    loaded = repo2.get(s.id)
+    assert loaded.policy == 'allow { true }'
+
+
+# ── API policy field ───────────────────────────────────────────────────────────
+
+def test_api_create_skill_with_policy(client):
+    res = client.post("/api/skills", json={
+        "name": "kubectl",
+        "description": "k8s cli",
+        "policy": 'allow {\n  input.argv[0] == "kubectl"\n}',
+    })
+    assert res.status_code == 201
+    data = res.json()
+    assert data["policy"] == 'allow {\n  input.argv[0] == "kubectl"\n}'
+
+
+def test_api_create_skill_default_policy_is_null(client):
+    res = client.post("/api/skills", json={"name": "gh", "description": "desc"})
+    assert res.status_code == 201
+    assert res.json()["policy"] is None
+
+
+def test_api_patch_skill_policy(client):
+    created = client.post("/api/skills", json={"name": "gh", "description": "desc"}).json()
+    res = client.patch(f"/api/skills/{created['id']}", json={"policy": "allow { true }"})
+    assert res.status_code == 200
+    assert res.json()["policy"] == "allow { true }"
+
+
+def test_api_patch_clears_policy_to_null(client):
+    created = client.post("/api/skills", json={
+        "name": "gh", "description": "desc", "policy": "allow { true }"
+    }).json()
+    res = client.patch(f"/api/skills/{created['id']}", json={"policy": None})
+    assert res.status_code == 200
+    assert res.json()["policy"] is None
+
+
+def test_api_patch_omitting_policy_leaves_it_unchanged(client):
+    created = client.post("/api/skills", json={
+        "name": "gh", "description": "desc", "policy": "allow { true }"
+    }).json()
+    res = client.patch(f"/api/skills/{created['id']}", json={"name": "gh-cli"})
+    assert res.status_code == 200
+    assert res.json()["policy"] == "allow { true }"
+
+
+def test_api_skill_policy_returned_in_list(client):
+    client.post("/api/skills", json={
+        "name": "kubectl", "description": "k8s", "policy": "allow { true }"
+    })
+    skills = client.get("/api/skills").json()
+    assert "policy" in skills[0]
+    assert skills[0]["policy"] == "allow { true }"
+
+
+# ── source field ───────────────────────────────────────────────────────────────
+
+def test_skill_default_source_is_local():
+    from datetime import datetime, timezone
+    s = Skill(id="x", name="n", description="d", created_at=datetime.now(timezone.utc))
+    assert s.source == "local"
+
+
+def test_skill_source_remote():
+    from datetime import datetime, timezone
+    s = Skill(id="x", name="n", description="d", created_at=datetime.now(timezone.utc), source="remote")
+    assert s.source == "remote"
+
+
+# ── Remote skills overlay ─────────────────────────────────────────────────────
+
+from unittest.mock import MagicMock
+
+
+@pytest.fixture
+def client_with_remote(tmp_path):
+    from app.skills import RemoteSkillRepository
+    from datetime import datetime, timezone
+
+    local_repo = SkillRepository(tmp_path / "skills.json")
+    local_repo.create(name="local-tool", description="A local skill")
+
+    remote_repo = MagicMock(spec=RemoteSkillRepository)
+    remote_skill = Skill(
+        id="remote-id-1",
+        name="remote-tool",
+        description="A remote skill",
+        enabled=True,
+        policy=None,
+        created_at=datetime.now(timezone.utc),
+        source="remote",
+    )
+    remote_repo.list_skills.return_value = [remote_skill]
+
+    app.state.skill_repo = local_repo
+    app.state.remote_skill_repo = remote_repo
+    yield TestClient(app)
+    # cleanup
+    app.state.remote_skill_repo = None
+
+
+def test_api_list_includes_remote_skills(client_with_remote):
+    res = client_with_remote.get("/api/skills")
+    assert res.status_code == 200
+    names = [s["name"] for s in res.json()]
+    assert "remote-tool" in names
+    assert "local-tool" in names
+
+
+def test_api_list_remote_skill_has_source_field(client_with_remote):
+    res = client_with_remote.get("/api/skills")
+    remote = next(s for s in res.json() if s["name"] == "remote-tool")
+    assert remote["source"] == "remote"
+
+
+def test_api_delete_remote_skill_returns_404(client_with_remote):
+    res = client_with_remote.delete("/api/skills/remote-id-1")
+    assert res.status_code == 404
+
+
+def test_api_patch_remote_skill_returns_404(client_with_remote):
+    res = client_with_remote.patch("/api/skills/remote-id-1", json={"name": "x"})
+    assert res.status_code == 404
+
+
+def test_api_create_skill_rejects_name_matching_remote(client_with_remote):
+    """Creating a local skill with the same name as a remote skill is rejected."""
+    res = client_with_remote.post("/api/skills", json={
+        "name": "remote-tool",
+        "description": "Trying to shadow the remote skill",
+    })
+    assert res.status_code == 409
+    assert "cannot be overridden" in res.json()["detail"]
+
+
+def test_api_create_skill_rejects_name_matching_remote_case_insensitive(client_with_remote):
+    """Name check is case-insensitive."""
+    res = client_with_remote.post("/api/skills", json={
+        "name": "Remote-Tool",
+        "description": "Case variant",
+    })
+    assert res.status_code == 409
+
+
+def test_api_create_skill_allows_different_name_with_remote(client_with_remote):
+    """Non-conflicting names are fine."""
+    res = client_with_remote.post("/api/skills", json={
+        "name": "other-tool",
+        "description": "A different tool",
+    })
+    assert res.status_code == 201
+
+
+def test_api_sync_returns_combined_skills(client_with_remote):
+    res = client_with_remote.post("/api/skills/sync")
+    assert res.status_code == 200
+    names = [s["name"] for s in res.json()["skills"]]
+    assert "remote-tool" in names
+
+
+def test_api_sync_returns_404_when_no_remote_repo(tmp_path):
+    local_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.skill_repo = local_repo
+    app.state.remote_skill_repo = None
+    client = TestClient(app)
+    res = client.post("/api/skills/sync")
+    assert res.status_code == 404
+
+
+def test_api_settings_includes_skills_repo_configured_false(tmp_path):
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    client = TestClient(app)
+    res = client.get("/api/settings")
+    assert res.status_code == 200
+    assert res.json()["skills_repo_configured"] is False
+
+
+def test_api_settings_includes_skills_repo_configured_true(client_with_remote):
+    res = client_with_remote.get("/api/settings")
+    assert res.status_code == 200
+    assert res.json()["skills_repo_configured"] is True
+
+
+# ── AppSettings repo URL via API ──────────────────────────────────────────────
+
+from unittest.mock import patch
+
+
+def test_api_settings_returns_skills_repo_url(tmp_path):
+    from app.settings_store import AppSettings, AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app_settings_repo.save(AppSettings(skills_repo_url="https://example.com/repo"))
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    res = client.get("/api/settings")
+    assert res.status_code == 200
+    assert res.json()["skills_repo_url"] == "https://example.com/repo"
+    assert res.json()["skills_repo_branch"] == "main"
+
+
+def test_api_settings_returns_null_url_when_not_configured(tmp_path):
+    from app.settings_store import AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    res = client.get("/api/settings")
+    assert res.status_code == 200
+    assert res.json()["skills_repo_url"] is None
+
+
+def test_api_put_settings_saves_repo_url(tmp_path):
+    from app.settings_store import AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    # We mock the RemoteSkillRepository so no real git call happens
+    with patch("app.main.RemoteSkillRepository") as MockRemote:
+        mock_repo = MagicMock()
+        MockRemote.return_value = mock_repo
+        res = client.put("/api/settings", json={
+            "skills_repo_url": "https://example.com/repo",
+            "skills_repo_branch": "develop",
+        })
+    assert res.status_code == 200
+    # URL is persisted
+    saved = app_settings_repo.load()
+    assert saved.skills_repo_url == "https://example.com/repo"
+    assert saved.skills_repo_branch == "develop"
+    # sync was called
+    mock_repo.sync.assert_called_once()
+
+
+def test_api_put_settings_clears_repo_url(tmp_path):
+    from app.settings_store import AppSettings, AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app_settings_repo.save(AppSettings(skills_repo_url="https://example.com/repo"))
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = MagicMock()  # pretend one is configured
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    res = client.put("/api/settings", json={"skills_repo_url": None})
+    assert res.status_code == 200
+    assert app.state.remote_skill_repo is None
+    saved = app_settings_repo.load()
+    assert saved.skills_repo_url is None
+
+
+def test_api_put_settings_returns_503_on_sync_failure(tmp_path):
+    from app.settings_store import AppSettingsRepository
+    app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
+    app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
+    app.state.remote_skill_repo = None
+    app.state.app_settings_repo = app_settings_repo
+    client = TestClient(app)
+    with patch("app.main.RemoteSkillRepository") as MockRemote:
+        mock_repo = MagicMock()
+        mock_repo.sync.side_effect = RuntimeError("git clone failed: not found")
+        MockRemote.return_value = mock_repo
+        res = client.put("/api/settings", json={"skills_repo_url": "https://bad.example.com/repo"})
+    assert res.status_code == 503
+    assert "git clone failed" in res.json()["detail"]
+    # URL is still saved despite sync failure
+    saved = app_settings_repo.load()
+    assert saved.skills_repo_url == "https://bad.example.com/repo"

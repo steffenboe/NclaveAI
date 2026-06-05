@@ -1,0 +1,168 @@
+import { useState, useEffect, useRef } from 'react'
+import Markdown from 'react-markdown'
+import CommandCard from './CommandCard'
+import ApprovalCard from './ApprovalCard'
+
+export default function ConversationFeed({ runs, chain, tailRun, onApprove, onDeny, onSubmit }) {
+  const [prompt, setPrompt] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [aborting, setAborting] = useState(false)
+  const feedRef = useRef(null)
+  const isAtBottom = useRef(true)
+
+  const tailStatus = tailRun?.status
+  const isRunning = tailStatus === 'running' || tailStatus === 'waiting_approval'
+  const isDisabled = submitting || isRunning
+
+  let placeholder = 'Ask the agent something\u2026'
+  if (tailStatus === 'waiting_approval') placeholder = 'Waiting for approval\u2026'
+  else if (tailStatus === 'running' || submitting) placeholder = 'Agent is working\u2026'
+  else if (chain.length > 0) placeholder = 'Continue this chat\u2026'
+
+  // Track whether the user is scrolled to the exact bottom
+  useEffect(() => {
+    const el = feedRef.current
+    if (!el) return
+    const handleScroll = () => {
+      isAtBottom.current = el.scrollHeight - el.scrollTop === el.clientHeight
+    }
+    el.addEventListener('scroll', handleScroll)
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Only auto-scroll if the user is at the bottom
+  useEffect(() => {
+    if (feedRef.current && isAtBottom.current) {
+      feedRef.current.scrollTop = feedRef.current.scrollHeight
+    }
+  }, [runs, chain])
+
+  // Reset aborting state when run finishes
+  useEffect(() => {
+    if (!isRunning) setAborting(false)
+  }, [isRunning])
+
+  async function handleSubmit() {
+    const p = prompt.trim()
+    if (!p || isDisabled) return
+    setPrompt('')
+    setSubmitting(true)
+    try {
+      await onSubmit(p)
+    } catch {
+      // onSubmit shows its own alert
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleAbort() {
+    if (!tailRun || aborting) return
+    setAborting(true)
+    try {
+      await fetch(`/api/agent/runs/${tailRun.run_id}/abort`, { method: 'POST' })
+    } catch {}
+  }
+
+  return (
+    <>
+      <div className="conversation-feed" ref={feedRef}>
+        {chain.length === 0
+          ? <div className="empty-hint">Start a new chat or select one from the sidebar.</div>
+          : chain.map(runId => {
+              const run = runs[runId]
+              if (!run) return null
+              return (
+                <ConversationTurn
+                  key={runId}
+                  run={run}
+                  onApprove={onApprove}
+                  onDeny={onDeny}
+                />
+              )
+            })
+        }
+      </div>
+
+      <div className="input-area">
+        <div className={'input-wrapper' + (isDisabled ? ' disabled' : '')}>
+          <input
+            id="prompt-input"
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            placeholder={placeholder}
+            disabled={isDisabled}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                handleSubmit()
+              }
+            }}
+          />
+          {isRunning ? (
+            <button id="run-btn" className="abort-btn" onClick={handleAbort} disabled={aborting}>
+              {aborting ? '\u23F3' : '\u25A0'}
+            </button>
+          ) : (
+            <button id="run-btn" onClick={handleSubmit} disabled={isDisabled}>&#9654;</button>
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function ConversationTurn({ run, onApprove, onDeny }) {
+  const [actionPending, setActionPending] = useState(false)
+  const ownActions = (run.history || []).slice(run.history_start_index || 0)
+  const showThinking = run.status === 'running' && ownActions.length === 0
+
+  async function handleApprove() {
+    setActionPending(true)
+    try { await onApprove(run.run_id) } finally { setActionPending(false) }
+  }
+
+  async function handleDeny() {
+    setActionPending(true)
+    try { await onDeny(run.run_id) } finally { setActionPending(false) }
+  }
+
+  return (
+    <>
+      <div className="turn-user">
+        <div className="user-bubble">{run.prompt}</div>
+      </div>
+
+      <div className="turn-agent">
+        <div className="agent-label">Agent</div>
+
+        {ownActions.map((action, i) => (
+          <CommandCard key={i} action={action} />
+        ))}
+
+        {showThinking && (
+          <div className="thinking">
+            <span className="spin" /> Thinking\u2026
+          </div>
+        )}
+
+        {run.status === 'waiting_approval' && run.pending_command && (
+          <ApprovalCard
+            run={run}
+            onApprove={handleApprove}
+            onDeny={handleDeny}
+            pending={actionPending}
+          />
+        )}
+
+        {run.status === 'done' && (
+          <div className="summary-block"><Markdown>{run.final_message || '(no response)'}</Markdown></div>
+        )}
+
+        {['failed', 'policy_denied'].includes(run.status) && run.final_message && (
+          <div className={'status-banner s-' + run.status}>{run.final_message}</div>
+        )}
+      </div>
+    </>
+  )
+}
