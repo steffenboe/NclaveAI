@@ -196,6 +196,7 @@ def _start_run_internal(
             remote_skill_repo=remote_skill_repo,
             secrets_store=app.state.secrets_store,
             user_require_approval=current_user.require_approval,
+            audit_repo=getattr(app.state, "audit_repo", None),
         )
         with _workflows_lock:
             _workflows[run_id] = workflow
@@ -300,6 +301,16 @@ async def lifespan(app: FastAPI):
         scheduled_task_repo = ScheduledTaskRepository(settings.scheduled_tasks_file)
         user_repo = UserRepository(settings.users_file)
 
+    # --- audit repository selection ---
+    if settings.mongodb_uri:
+        from app.audit import MongoAuditRepository
+        audit_repo = MongoAuditRepository(mongo_db)
+    else:
+        from app.audit import FileAuditRepository
+        audit_repo = FileAuditRepository(settings.audit_file)
+    
+    app.state.audit_repo = audit_repo
+
     app.state.skill_repo = skill_repo
     app.state.app_settings_repo = app_settings_repo
     app_settings = app_settings_repo.load()
@@ -384,6 +395,7 @@ def _build_workflow(
     remote_skill_repo=None,
     secrets_store: SecretsStore | None = None,
     user_require_approval: bool = False,
+    audit_repo=None,
 ) -> AgentWorkflow:
     local_skills = skill_repo.list()
     remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
@@ -414,6 +426,7 @@ def _build_workflow(
         executor=CommandExecutor(),
         approval_gate=gate,
         secrets_store=secrets_store,
+        audit_repo=audit_repo,
     )
 
 

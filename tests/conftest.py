@@ -62,6 +62,7 @@ def client(tmp_path):
     from app.settings_store import AppSettingsRepository
     from app.skills import SkillRepository
     from app.users import UserRepository
+    from app.audit import FileAuditRepository
 
     # Pre-populate a fresh user repo with known test users
     user_repo = UserRepository(tmp_path / "users.json")
@@ -82,6 +83,7 @@ def client(tmp_path):
         app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
         app.state.app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
         app.state.secrets_store = SecretsStore(tmp_path / "secrets.json")
+        app.state.audit_repo = FileAuditRepository(tmp_path / "audit.jsonl")
         app.state.user_repo = user_repo
         app.state.remote_skill_repo = None
 
