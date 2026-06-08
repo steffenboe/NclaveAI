@@ -14,3 +14,10 @@ def test_settings_file_default():
 def test_skills_repo_url_not_on_settings():
     s = Settings()
     assert not hasattr(s, "skills_repo_url")
+
+
+def test_audit_file_default():
+    from app.config import Settings
+    s = Settings()
+    assert str(s.audit_file) == "audit.jsonl"
+

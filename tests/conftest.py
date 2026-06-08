@@ -25,7 +25,7 @@ def _bypass_auth_for_non_auth_tests(request):
     Tests in test_main_auth.py and test_main_rbac.py opt out of this bypass so
     they exercise the real login / cookie / JWT / RBAC flow.
     """
-    _real_auth_files = ("test_main_auth", "test_main_rbac", "test_scheduled_tasks_api")
+    _real_auth_files = ("test_main_auth", "test_main_rbac", "test_scheduled_tasks_api", "test_audit_api")
     if any(name in request.node.nodeid for name in _real_auth_files):
         yield
         return
@@ -62,6 +62,7 @@ def client(tmp_path):
     from app.settings_store import AppSettingsRepository
     from app.skills import SkillRepository
     from app.users import UserRepository
+    from app.audit import FileAuditRepository
 
     # Pre-populate a fresh user repo with known test users
     user_repo = UserRepository(tmp_path / "users.json")
@@ -82,6 +83,7 @@ def client(tmp_path):
         app.state.skill_repo = SkillRepository(tmp_path / "skills.json")
         app.state.app_settings_repo = AppSettingsRepository(tmp_path / "settings.json")
         app.state.secrets_store = SecretsStore(tmp_path / "secrets.json")
+        app.state.audit_repo = FileAuditRepository(tmp_path / "audit.jsonl")
         app.state.user_repo = user_repo
         app.state.remote_skill_repo = None
 

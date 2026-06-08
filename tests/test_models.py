@@ -78,3 +78,46 @@ def test_run_context_history_start_index_serializes_to_json():
     assert data["history_start_index"] == 2
 
 
+def test_command_policy_evaluated_defaults():
+    from app.models import CommandPolicyEvaluated
+    e = CommandPolicyEvaluated(
+        run_id="r1",
+        owner_id="u1",
+        command_id="c1",
+        argv=["ls", "-la"],
+        allowed=True,
+        approval_required=False,
+    )
+    assert e.event_id
+    assert e.timestamp
+    assert e.skill_name is None
+    assert e.policy_reason is None
+
+
+def test_command_approval_decision_defaults():
+    from app.models import CommandApprovalDecision
+    e = CommandApprovalDecision(
+        run_id="r1",
+        owner_id="u1",
+        command_id="c1",
+        approval_request_id="a1",
+        actor_id="user-42",
+        decision="approved",
+    )
+    assert e.event_id
+    assert e.reason is None
+
+
+def test_command_execution_finished_defaults():
+    from app.models import CommandExecutionFinished
+    e = CommandExecutionFinished(
+        run_id="r1",
+        owner_id="u1",
+        command_id="c1",
+        exit_code=0,
+        succeeded=True,
+    )
+    assert e.event_id
+    assert e.approval_request_id is None
+
+

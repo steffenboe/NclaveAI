@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 
@@ -32,12 +33,14 @@ class AgentWorkflow:
         executor: CommandExecutor,
         approval_gate: Callable[[Command], bool] | None = None,
         secrets_store: SecretsStore | None = None,
+        audit_repo=None,
     ) -> None:
         self._planner = planner
         self._policy = policy
         self._executor = executor
         self._approval_gate = approval_gate
         self._secrets_store = secrets_store
+        self._audit_repo = audit_repo
         self._abort = False
 
     def abort(self) -> None:
@@ -87,7 +90,12 @@ class AgentWorkflow:
             command = plan_output.command  # guaranteed non-None when status == "action"
 
             # VALIDATE (OPA step)
+            command_id = str(uuid.uuid4())
             allowed, reason, skill = self._policy.evaluate(command, skill_overrides=ctx.skill_overrides)
+            approval_required = self._approval_gate is not None
+            
+            self._emit_policy_event(ctx, command, command_id, skill, allowed, reason, approval_required)
+            
             if not allowed:
                 self._log("policy_denied", ctx, extra={
                     "argv": command.argv,
@@ -98,11 +106,21 @@ class AgentWorkflow:
                 break
 
             # HUMAN APPROVAL (optional gate)
-            if self._approval_gate is not None and not self._approval_gate(command):
-                self._log("approval_denied", ctx, extra={"argv": command.argv})
-                ctx.status = "policy_denied"
-                ctx.final_message = f"Run stopped: '{ ' '.join(command.argv) }' was not approved."
-                break
+            approval_id = None
+            if self._approval_gate is not None:
+                approval_id = str(uuid.uuid4())
+                approved = self._approval_gate(command)
+                if not approved:
+                    self._emit_approval_event(ctx, command_id, approval_id,
+                        actor_id=getattr(ctx, "last_actor_id", None),
+                        decision="denied" if not getattr(ctx, "_approval_expired", False) else "expired")
+                    self._log("approval_denied", ctx, extra={"argv": command.argv})
+                    ctx.status = "policy_denied"
+                    ctx.final_message = f"Run stopped: '{ ' '.join(command.argv) }' was not approved."
+                    break
+                self._emit_approval_event(ctx, command_id, approval_id,
+                    actor_id=getattr(ctx, "last_actor_id", None),
+                    decision="approved")
 
             # Resolve per-skill env vars from secrets store (NOT from process env)
             skill_env: dict[str, str] | None = None
@@ -125,6 +143,7 @@ class AgentWorkflow:
             result = self._executor.run(command, env=skill_env)
             result.skill_name = skill.name if skill else None
             ctx.history.append(result)
+            self._emit_execution_event(ctx, command_id, approval_id, result)
             self._log("action_executed", ctx, extra={
                 "argv": command.argv,
                 "exit_code": result.exit_code,
@@ -158,3 +177,54 @@ class AgentWorkflow:
             **(extra or {}),
         }
         logger.info(json.dumps(record))
+
+    def _emit_policy_event(self, ctx, command, command_id, skill, allowed, reason, approval_required) -> None:
+        if self._audit_repo is None:
+            return
+        from app.models import CommandPolicyEvaluated
+        try:
+            self._audit_repo.append(CommandPolicyEvaluated(
+                run_id=ctx.run_id,
+                owner_id=ctx.owner_id or "",
+                command_id=command_id,
+                argv=command.argv,
+                skill_name=skill.name if skill else None,
+                allowed=allowed,
+                policy_reason=reason,
+                approval_required=approval_required,
+            ))
+        except Exception as exc:
+            logger.warning("Failed to append policy audit event: %s", exc)
+
+    def _emit_approval_event(self, ctx, command_id, approval_id, actor_id, decision) -> None:
+        if self._audit_repo is None:
+            return
+        from app.models import CommandApprovalDecision
+        try:
+            self._audit_repo.append(CommandApprovalDecision(
+                run_id=ctx.run_id,
+                owner_id=ctx.owner_id or "",
+                command_id=command_id,
+                approval_request_id=approval_id,
+                actor_id=actor_id,
+                decision=decision,
+            ))
+        except Exception as exc:
+            logger.warning("Failed to append approval audit event: %s", exc)
+
+    def _emit_execution_event(self, ctx, command_id, approval_id, result) -> None:
+        if self._audit_repo is None:
+            return
+        from app.models import CommandExecutionFinished
+        try:
+            self._audit_repo.append(CommandExecutionFinished(
+                run_id=ctx.run_id,
+                owner_id=ctx.owner_id or "",
+                command_id=command_id,
+                approval_request_id=approval_id,
+                exit_code=result.exit_code if result.exit_code is not None else -1,
+                succeeded=(result.exit_code == 0),
+            ))
+        except Exception as exc:
+            logger.warning("Failed to append execution audit event: %s", exc)
+

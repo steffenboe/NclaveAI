@@ -23,7 +23,7 @@ style: |
   strong { color: #000; }
 ---
 
-# NclaveOS Agentic Operating System
+# NclaveAI Agentic Operating System
 *An Early-Access Open Source Project Made by Exxeta*
 
 > KI-Agenten für Teams — governed, auditierbar, self-hosted
@@ -66,7 +66,7 @@ Der Agent kann Prod-Ressourcen löschen — nichts hält ihn auf.
 
 ---
 
-## Introducing: NclaveOS Agentic Operating System 
+## Introducing: NclaveAI Agentic Operating System 
 *"From personal automation to governed agent infrastructure."*
 <div class="cols-vcenter">
 <div>
@@ -90,12 +90,12 @@ Der Agent kann Prod-Ressourcen löschen — nichts hält ihn auf.
 
 ---
 
-## Lokaler Agent vs. NclaveOS
+## Lokaler Agent vs. NclaveAI
 
 
 <div class="center-table">
 
-| Fähigkeit | Claude Desktop / MCP | nclaveOS |
+| Fähigkeit | Claude Desktop / MCP | NclaveAI |
 |---|:---:|:---:|
 | Multi-User mit Rollen | ✗ | ✓ |
 | Policy-gated Execution | ✗ | ✓ OPA Rego |
@@ -263,4 +263,4 @@ docker compose up -d
 
 <br>
 
-> MIT License · © 2026 Exxeta AG · `github.com/exxeta/nclaveos`
+> MIT License · © 2026 Exxeta AG · `github.com/exxeta/nclaveai`

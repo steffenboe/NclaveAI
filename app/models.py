@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -50,6 +51,49 @@ class ActionResult(BaseModel):
     exit_code: int | None = None
 
 
+class CommandPolicyEvaluated(BaseModel):
+    """Emitted for every command the planner proposes, whether allowed or denied."""
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    run_id: str
+    owner_id: str
+    command_id: str                  # stable id shared with downstream events
+    argv: list[str]                  # raw argv with ${VAR} placeholders — never resolved
+    skill_name: str | None = None
+    allowed: bool
+    policy_reason: str | None = None
+    approval_required: bool
+
+
+class CommandApprovalDecision(BaseModel):
+    """Emitted when the human approval gate reaches a decision (or expires)."""
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    run_id: str
+    owner_id: str
+    command_id: str
+    approval_request_id: str         # id of the PendingApproval instance
+    actor_id: str | None = None      # null if expired/system-denied
+    decision: Literal["approved", "denied", "expired"]
+    reason: str | None = None
+
+
+class CommandExecutionFinished(BaseModel):
+    """Emitted only when a command actually executed (policy + approval both passed)."""
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    run_id: str
+    owner_id: str
+    command_id: str
+    approval_request_id: str | None = None   # null when no approval gate was active
+    exit_code: int
+    succeeded: bool
+
+
+AuditEvent = CommandPolicyEvaluated | CommandApprovalDecision | CommandExecutionFinished
+
+
+
 class RunContext(BaseModel):
     run_id: str
     prompt: str
@@ -64,6 +108,7 @@ class RunContext(BaseModel):
     skill_overrides: dict[str, bool] = {}
     llm_model: str | None = None
     owner_id: str | None = None
+    last_actor_id: str | None = None   # transient; not persisted (cleared after each command)
 
 
 class ScheduledTask(BaseModel):

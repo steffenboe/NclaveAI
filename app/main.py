@@ -15,7 +15,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -70,6 +70,8 @@ class PendingApproval:
     command: Command
     event: threading.Event = field(default_factory=threading.Event)
     approved: bool = False
+    actor_id: str | None = None   # set by approve/deny endpoint
+    timed_out: bool = False       # set by gate on timeout
 
 
 def _make_approval_gate(run_id: str, ctx: RunContext):
@@ -84,12 +86,17 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
         ctx.status = "waiting_approval"
 
         timed_out = not approval.event.wait(timeout=300)
-
+        ctx.last_actor_id = approval.actor_id
+        
         if timed_out:
             with _pending_approvals_lock:
                 _pending_approvals.pop(run_id, None)
             ctx.pending_command = None
+            ctx._approval_expired = True
+            approval.timed_out = True
             return False  # timed_out is authoritative; ignores any late approve
+        else:
+            ctx._approval_expired = False
 
         ctx.pending_command = None
         if approval.approved:
@@ -189,6 +196,7 @@ def _start_run_internal(
             remote_skill_repo=remote_skill_repo,
             secrets_store=app.state.secrets_store,
             user_require_approval=current_user.require_approval,
+            audit_repo=getattr(app.state, "audit_repo", None),
         )
         with _workflows_lock:
             _workflows[run_id] = workflow
@@ -293,6 +301,16 @@ async def lifespan(app: FastAPI):
         scheduled_task_repo = ScheduledTaskRepository(settings.scheduled_tasks_file)
         user_repo = UserRepository(settings.users_file)
 
+    # --- audit repository selection ---
+    if settings.mongodb_uri:
+        from app.audit import MongoAuditRepository
+        audit_repo = MongoAuditRepository(mongo_db)
+    else:
+        from app.audit import FileAuditRepository
+        audit_repo = FileAuditRepository(settings.audit_file)
+    
+    app.state.audit_repo = audit_repo
+
     app.state.skill_repo = skill_repo
     app.state.app_settings_repo = app_settings_repo
     app_settings = app_settings_repo.load()
@@ -377,6 +395,7 @@ def _build_workflow(
     remote_skill_repo=None,
     secrets_store: SecretsStore | None = None,
     user_require_approval: bool = False,
+    audit_repo=None,
 ) -> AgentWorkflow:
     local_skills = skill_repo.list()
     remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
@@ -407,6 +426,7 @@ def _build_workflow(
         executor=CommandExecutor(),
         approval_gate=gate,
         secrets_store=secrets_store,
+        audit_repo=audit_repo,
     )
 
 
@@ -1109,7 +1129,61 @@ def put_settings(body: SettingsPatchRequest, request: Request, current_user: Use
         )
 
 
+# ── Audit ─────────────────────────────────────────────────────────────────────
+
+
+class AuditQueryResponse(BaseModel):
+    total: int
+    items: list[dict]
+
+
+@app.get("/api/admin/audit", response_model=AuditQueryResponse)
+def list_audit_events(
+    request: Request,
+    current_user: User = Depends(require_admin),
+    run_id: str | None = None,
+    owner_id: str | None = None,
+    skill_name: str | None = None,
+    event_type: str | None = None,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> AuditQueryResponse:
+    audit_repo = getattr(request.app.state, "audit_repo", None)
+    if audit_repo is None:
+        return AuditQueryResponse(total=0, items=[])
+
+    from datetime import datetime
+    from_ts = datetime.fromisoformat(from_) if from_ else None
+    to_ts = datetime.fromisoformat(to) if to else None
+    limit = min(limit, 1000)
+
+    # skill_name is only on CommandPolicyEvaluated; filter post-query
+    events = audit_repo.query(
+        run_id=run_id,
+        owner_id=owner_id,
+        event_type=event_type,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        limit=100_000,
+        offset=0,
+    )
+    if skill_name is not None:
+        events = [e for e in events if getattr(e, "skill_name", None) == skill_name]
+
+    total = len(events)
+    page = events[offset: offset + limit]
+    
+    from app.audit import _event_type_tag
+    return AuditQueryResponse(
+        total=total,
+        items=[{**e.model_dump(mode="json"), "event_type": _event_type_tag(e)} for e in page],
+    )
+
+
 # ── Approval ──────────────────────────────────────────────────────────────────
+
 
 
 @app.post("/api/agent/runs/{run_id}/approve", status_code=200)
@@ -1125,6 +1199,7 @@ def approve_command(run_id: str, current_user: User = Depends(get_current_user))
         raise HTTPException(
             status_code=404, detail=f"No pending approval for run {run_id!r}"
         )
+    approval.actor_id = current_user.user_id
     approval.approved = True
     approval.event.set()
     return {"status": "approved"}
@@ -1143,6 +1218,7 @@ def deny_command(run_id: str, current_user: User = Depends(get_current_user)) ->
         raise HTTPException(
             status_code=404, detail=f"No pending approval for run {run_id!r}"
         )
+    approval.actor_id = current_user.user_id
     approval.event.set()  # approved stays False
     return {"status": "denied"}
 

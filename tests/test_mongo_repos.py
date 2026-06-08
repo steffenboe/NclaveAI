@@ -331,3 +331,72 @@ class TestMongoAppSettingsRepository:
         repo.save(AppSettings(skills_repo_url="https://second.example.com"))
         assert repo.load().skills_repo_url == "https://second.example.com"
         assert mongo_db["settings"].count_documents({}) == 1
+
+
+# ---------------------------------------------------------------------------
+# MongoAuditRepository
+# ---------------------------------------------------------------------------
+
+def test_mongo_audit_append_and_query(mongo_db):
+    from app.audit import MongoAuditRepository
+    from app.models import CommandPolicyEvaluated
+
+    repo = MongoAuditRepository(mongo_db)
+    e = CommandPolicyEvaluated(
+        run_id="r1", owner_id="u1", command_id="c1",
+        argv=["ls"], allowed=True, approval_required=False,
+    )
+    repo.append(e)
+    results = repo.query()
+    assert len(results) == 1
+    assert results[0].event_id == e.event_id
+    assert type(results[0]).__name__ == "CommandPolicyEvaluated"
+
+
+def test_mongo_audit_mixed_types_round_trip(mongo_db):
+    from app.audit import MongoAuditRepository
+    from app.models import CommandPolicyEvaluated, CommandApprovalDecision, CommandExecutionFinished
+
+    repo = MongoAuditRepository(mongo_db)
+    repo.append(CommandPolicyEvaluated(
+        run_id="r1", owner_id="u1", command_id="c1",
+        argv=["ls"], allowed=True, approval_required=True,
+    ))
+    repo.append(CommandApprovalDecision(
+        run_id="r1", owner_id="u1", command_id="c1",
+        approval_request_id="req-1", actor_id="u1", decision="approved",
+    ))
+    repo.append(CommandExecutionFinished(
+        run_id="r1", owner_id="u1", command_id="c1",
+        approval_request_id="req-1", exit_code=0, succeeded=True,
+    ))
+    by_command = repo.query(command_id="c1")
+    assert len(by_command) == 3
+    types = {type(e).__name__ for e in by_command}
+    assert types == {"CommandPolicyEvaluated", "CommandApprovalDecision", "CommandExecutionFinished"}
+
+
+def test_mongo_audit_deletion_invariant(mongo_db):
+    """MongoAuditRepository has no delete method."""
+    from app.audit import MongoAuditRepository
+    repo = MongoAuditRepository(mongo_db)
+    assert not hasattr(repo, "delete")
+
+
+def test_mongo_audit_query_filters(mongo_db):
+    from app.audit import MongoAuditRepository
+    from app.models import CommandPolicyEvaluated
+
+    repo = MongoAuditRepository(mongo_db)
+    repo.append(CommandPolicyEvaluated(
+        run_id="r1", owner_id="alice", command_id="c1",
+        argv=["ls"], allowed=True, approval_required=False,
+    ))
+    repo.append(CommandPolicyEvaluated(
+        run_id="r2", owner_id="bob", command_id="c2",
+        argv=["rm", "-rf", "/"], allowed=False, approval_required=False,
+    ))
+    assert len(repo.query(owner_id="alice")) == 1
+    assert len(repo.query(run_id="r2")) == 1
+    assert len(repo.query(event_type="command_policy_evaluated")) == 2
+
