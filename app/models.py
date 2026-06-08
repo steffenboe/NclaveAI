@@ -108,6 +108,7 @@ class RunContext(BaseModel):
     skill_overrides: dict[str, bool] = {}
     llm_model: str | None = None
     owner_id: str | None = None
+    last_actor_id: str | None = None   # transient; not persisted (cleared after each command)
 
 
 class ScheduledTask(BaseModel):

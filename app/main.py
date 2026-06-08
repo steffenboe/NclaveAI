@@ -70,6 +70,8 @@ class PendingApproval:
     command: Command
     event: threading.Event = field(default_factory=threading.Event)
     approved: bool = False
+    actor_id: str | None = None   # set by approve/deny endpoint
+    timed_out: bool = False       # set by gate on timeout
 
 
 def _make_approval_gate(run_id: str, ctx: RunContext):
@@ -84,12 +86,17 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
         ctx.status = "waiting_approval"
 
         timed_out = not approval.event.wait(timeout=300)
-
+        ctx.last_actor_id = approval.actor_id
+        
         if timed_out:
             with _pending_approvals_lock:
                 _pending_approvals.pop(run_id, None)
             ctx.pending_command = None
+            ctx._approval_expired = True
+            approval.timed_out = True
             return False  # timed_out is authoritative; ignores any late approve
+        else:
+            ctx._approval_expired = False
 
         ctx.pending_command = None
         if approval.approved:
@@ -1125,6 +1132,7 @@ def approve_command(run_id: str, current_user: User = Depends(get_current_user))
         raise HTTPException(
             status_code=404, detail=f"No pending approval for run {run_id!r}"
         )
+    approval.actor_id = current_user.user_id
     approval.approved = True
     approval.event.set()
     return {"status": "approved"}
@@ -1143,6 +1151,7 @@ def deny_command(run_id: str, current_user: User = Depends(get_current_user)) ->
         raise HTTPException(
             status_code=404, detail=f"No pending approval for run {run_id!r}"
         )
+    approval.actor_id = current_user.user_id
     approval.event.set()  # approved stays False
     return {"status": "denied"}
 
