@@ -56,6 +56,22 @@ def mock_policy():
     return m
 
 
+@pytest.fixture
+def mock_policy_deny():
+    m = MagicMock()
+    m.evaluate.return_value = (False, "Denied by policy", None)
+    return m
+
+
+def _make_audit_repo():
+    from app.models import CommandPolicyEvaluated, CommandApprovalDecision, CommandExecutionFinished
+    repo = MagicMock()
+    repo.appended = []
+    repo.append.side_effect = lambda e: repo.appended.append(e)
+    return repo
+
+
+
 def test_workflow_runs_single_action_then_done(workflow):
     workflow._planner.next_action.side_effect = [
         _planner_output(status="action"),
@@ -563,3 +579,63 @@ def test_workflow_no_secrets_store_passes_no_env(mock_planner, mock_executor):
     call_kwargs = mock_executor.run.call_args
     env_arg = call_kwargs[1].get("env") if call_kwargs[1] else None
     assert env_arg is None
+
+
+def test_workflow_emits_policy_and_execution_events_on_allow(
+    mock_planner, mock_policy, mock_executor
+):
+    from app.workflow import AgentWorkflow
+    from app.models import CommandPolicyEvaluated, CommandExecutionFinished
+
+    audit_repo = _make_audit_repo()
+    mock_planner.next_action.side_effect = [
+        _planner_output(status="action"),
+        _planner_output(status="done"),
+    ]
+    mock_executor.run.return_value = _action_result()
+    
+    wf = AgentWorkflow(
+        planner=mock_planner,
+        policy=mock_policy,
+        executor=mock_executor,
+        audit_repo=audit_repo,
+    )
+    wf.run(prompt="test", run_id="r1", max_iterations=1)
+
+    types = [type(e).__name__ for e in audit_repo.appended]
+    assert "CommandPolicyEvaluated" in types
+    assert "CommandExecutionFinished" in types
+    assert "CommandApprovalDecision" not in types
+
+    policy_event = next(e for e in audit_repo.appended if isinstance(e, CommandPolicyEvaluated))
+    exec_event = next(e for e in audit_repo.appended if isinstance(e, CommandExecutionFinished))
+    assert policy_event.run_id == "r1"
+    assert policy_event.allowed is True
+    assert policy_event.command_id == exec_event.command_id
+
+
+def test_workflow_emits_only_policy_event_on_policy_deny(
+    mock_planner, mock_policy_deny, mock_executor
+):
+    from app.workflow import AgentWorkflow
+    from app.models import CommandPolicyEvaluated
+
+    audit_repo = _make_audit_repo()
+    mock_planner.next_action.return_value = _planner_output(status="action")
+    
+    wf = AgentWorkflow(
+        planner=mock_planner,
+        policy=mock_policy_deny,
+        executor=mock_executor,
+        audit_repo=audit_repo,
+    )
+    wf.run(prompt="test", run_id="r1", max_iterations=1)
+
+    types = [type(e).__name__ for e in audit_repo.appended]
+    assert "CommandPolicyEvaluated" in types
+    assert "CommandApprovalDecision" not in types
+    assert "CommandExecutionFinished" not in types
+
+    policy_event = next(e for e in audit_repo.appended if isinstance(e, CommandPolicyEvaluated))
+    assert policy_event.allowed is False
+
