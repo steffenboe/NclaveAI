@@ -119,3 +119,49 @@ class FileAuditRepository:
             events = [e for e in events if (e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp) <= to_normalized]
 
         return events[offset: offset + limit]
+
+
+class MongoAuditRepository:
+    """MongoDB audit store. Records are permanent — no delete method exposed."""
+
+    def __init__(self, db) -> None:
+        self._col = db["audit_events"]
+
+    def append(self, event: AuditEvent) -> None:
+        doc = json.loads(_serialize(event))
+        doc["_id"] = event.event_id
+        self._col.insert_one(doc)
+
+    def query(
+        self,
+        run_id: str | None = None,
+        owner_id: str | None = None,
+        command_id: str | None = None,
+        event_type: str | None = None,
+        from_ts: datetime | None = None,
+        to_ts: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AuditEvent]:
+        q: dict = {}
+        if run_id is not None:
+            q["run_id"] = run_id
+        if owner_id is not None:
+            q["owner_id"] = owner_id
+        if command_id is not None:
+            q["command_id"] = command_id
+        if event_type is not None:
+            q["event_type"] = event_type
+        if from_ts is not None or to_ts is not None:
+            ts_q: dict = {}
+            if from_ts is not None:
+                ts_q["$gte"] = from_ts.isoformat()
+            if to_ts is not None:
+                ts_q["$lte"] = to_ts.isoformat()
+            q["timestamp"] = ts_q
+        result = []
+        for doc in self._col.find(q).skip(offset).limit(limit):
+            doc.pop("_id", None)
+            result.append(_deserialize(json.dumps(doc)))
+        return result
+
