@@ -25,7 +25,7 @@ def _bypass_auth_for_non_auth_tests(request):
     Tests in test_main_auth.py and test_main_rbac.py opt out of this bypass so
     they exercise the real login / cookie / JWT / RBAC flow.
     """
-    _real_auth_files = ("test_main_auth", "test_main_rbac", "test_scheduled_tasks_api")
+    _real_auth_files = ("test_main_auth", "test_main_rbac", "test_scheduled_tasks_api", "test_audit_api")
     if any(name in request.node.nodeid for name in _real_auth_files):
         yield
         return

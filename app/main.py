@@ -15,7 +15,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -1129,7 +1129,61 @@ def put_settings(body: SettingsPatchRequest, request: Request, current_user: Use
         )
 
 
+# ── Audit ─────────────────────────────────────────────────────────────────────
+
+
+class AuditQueryResponse(BaseModel):
+    total: int
+    items: list[dict]
+
+
+@app.get("/api/admin/audit", response_model=AuditQueryResponse)
+def list_audit_events(
+    request: Request,
+    current_user: User = Depends(require_admin),
+    run_id: str | None = None,
+    owner_id: str | None = None,
+    skill_name: str | None = None,
+    event_type: str | None = None,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> AuditQueryResponse:
+    audit_repo = getattr(request.app.state, "audit_repo", None)
+    if audit_repo is None:
+        return AuditQueryResponse(total=0, items=[])
+
+    from datetime import datetime
+    from_ts = datetime.fromisoformat(from_) if from_ else None
+    to_ts = datetime.fromisoformat(to) if to else None
+    limit = min(limit, 1000)
+
+    # skill_name is only on CommandPolicyEvaluated; filter post-query
+    events = audit_repo.query(
+        run_id=run_id,
+        owner_id=owner_id,
+        event_type=event_type,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        limit=100_000,
+        offset=0,
+    )
+    if skill_name is not None:
+        events = [e for e in events if getattr(e, "skill_name", None) == skill_name]
+
+    total = len(events)
+    page = events[offset: offset + limit]
+    
+    from app.audit import _event_type_tag
+    return AuditQueryResponse(
+        total=total,
+        items=[{**e.model_dump(mode="json"), "event_type": _event_type_tag(e)} for e in page],
+    )
+
+
 # ── Approval ──────────────────────────────────────────────────────────────────
+
 
 
 @app.post("/api/agent/runs/{run_id}/approve", status_code=200)
