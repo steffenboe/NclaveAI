@@ -142,8 +142,8 @@ When enabled (per-user or globally by an admin), the agent pauses before executi
 ### Installation
 
 ```sh
-git clone git@github.com:EXXETA/nclaveos.git
-cd nclaveos
+git clone git@github.com:EXXETA/nclaveai.git
+cd nclaveai
 ```
 
 Edit `docker-compose.yml` and set at minimum:
