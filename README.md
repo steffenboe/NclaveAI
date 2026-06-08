@@ -1,4 +1,4 @@
-# NclaveOS: An Agentic Operating System
+# NclaveAI: An Agentic Operating System
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -11,6 +11,8 @@
 → [Slide deck (docs/slides.pdf)](docs/slides.pdf)`
 
 ---
+
+![nclaveai](nclaveai.png)
 
 ## Table of contents
 
@@ -30,9 +32,9 @@
 
 ## What it is
 
-`NclaveOS` is a self-hosted platform that lets users drive CLI tools and infrastructure through natural language — with every generated command evaluated against an [Open Policy Agent](https://www.openpolicyagent.org/) (OPA) policy before it is executed.
+`NclaveAI` is a self-hosted platform that lets users drive CLI tools and infrastructure through natural language — with every generated command evaluated against an [Open Policy Agent](https://www.openpolicyagent.org/) (OPA) policy before it is executed.
 
-Unlike personal AI assistants, agents in `NclaveOS` are **centrally governed**: what tools exist, which commands are permitted, and which secrets can be used are all defined by administrators and enforced at the platform level — not left to individual users to configure on their machines.
+Unlike personal AI assistants, agents in `NclaveAI` are **centrally governed**: what tools exist, which commands are permitted, and which secrets can be used are all defined by administrators and enforced at the platform level — not left to individual users to configure on their machines.
 
 You describe a goal in plain text. The agent plans a sequence of commands, executes them one by one, observes the results, and repeats until the goal is reached or the policy blocks the next step. Everything is accessible through a browser UI with multi-user support, role-based access control, per-skill secret injection, and a full audit trail of every command ever run.
 
@@ -51,13 +53,13 @@ Personal AI tools are powerful, but they are designed for one person on one mach
 
 …you need infrastructure, not just a local assistant.
 
-`NclaveOS` fills that gap: a governed, auditable, multi-user agent platform that you control and host yourself.
+`NclaveAI` fills that gap: a governed, auditable, multi-user agent platform that you control and host yourself.
 
 ---
 
 ## How it differs from local agent tools
 
-| Capability | Claude Desktop / local MCP | NclaveOS |
+| Capability | Claude Desktop / local MCP | NclaveAI |
 |---|---|---|
 | Multi-user with roles | ✗ | ✓ admin + user roles |
 | Policy-gated execution | ✗ | ✓ OPA Rego, per-skill |
@@ -315,7 +317,27 @@ Per-user and global approval flags provide human-in-the-loop oversight. When ena
 
 ### Audit trail
 
-Every run is persisted with its full command history, timestamps, originating prompt, and final status. The run history is browsable via the UI and queryable via the API.
+NclaveAI maintains a **compliance-grade audit log** that records every command execution attempt as a series of immutable, linked events. The audit log is **independent of run history**: even if a run is deleted, its audit events remain permanently stored.
+
+**Event types:**
+1. **CommandPolicyEvaluated** — recorded when a command is evaluated against policy; includes skill name, allowed/denied decision, approval requirement
+2. **CommandApprovalDecision** — recorded when a user approves or denies a command (includes actor identity and timestamp)
+3. **CommandExecutionFinished** — recorded when a command finishes execution (includes exit code, stdout, stderr)
+
+All three events share a common `command_id` UUID that links them together for a single command attempt.
+
+**Storage backends:**
+- **File backend** (default): Append-only JSONL file at `./audit.jsonl`
+- **MongoDB backend**: Permanent collection (configurable via `MONGODB_URI`)
+
+**Querying:**
+Audit events are queryable via `GET /api/admin/audit` (admin-only) with filters for:
+- Run ID, owner ID, skill name, event type
+- Time range (`from` / `to` ISO timestamps)
+- Pagination (`limit` / `offset`)
+
+**Deletion invariant:**
+Deleting a run **does not** remove its audit events. This ensures a complete, tamper-evident record for compliance and forensic analysis.
 
 ---
 
@@ -336,6 +358,7 @@ Every run is persisted with its full command history, timestamps, originating pr
 | `SKILLS_FILE` | no | `./skills.json` | Path to local skill store |
 | `RUNS_FILE` | no | `./runs.json` | Path to run history |
 | `SECRETS_FILE` | no | `./secrets.json` | Path to secrets store |
+| `AUDIT_FILE` | no | `./audit.jsonl` | Path to audit log (file backend) |
 
 The remote skill repository is configured via the UI (Settings modal → Remote skill repository), not via environment variables.
 
