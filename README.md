@@ -142,7 +142,7 @@ When enabled (per-user or globally by an admin), the agent pauses before executi
 ### Installation
 
 ```sh
-git clone git@github.com:EXXETA/nclaveai.git
+git clone git@github.com:steffenboe/NclaveAI.git
 cd nclaveai
 ```
 
