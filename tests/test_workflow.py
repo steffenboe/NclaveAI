@@ -1,10 +1,12 @@
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from pydantic import ValidationError
 
 from app.models import ActionResult, Command, PlannerOutput, RunContext
 from app.workflow import AgentWorkflow
+from tests.helpers import FakeLLMError
 
 
 def _cmd(argv=None):
@@ -639,3 +641,19 @@ def test_workflow_emits_only_policy_event_on_policy_deny(
     policy_event = next(e for e in audit_repo.appended if isinstance(e, CommandPolicyEvaluated))
     assert policy_event.allowed is False
 
+# ── LLM Errors Tests ────────────────────────────────────────────────────
+
+def test_workflow_formats_llm_unauthorized_error(workflow):
+    workflow._planner.next_action.side_effect = FakeLLMError(
+        "HTTP 401 Unauthorized",
+        status_code=401,
+    )
+
+    ctx = workflow.run("test prompt", "run-llm-401")
+
+    assert ctx.status == "failed"
+    assert (
+        ctx.final_message
+        == "LLM API authorization failed. Check the configured API key."
+    )
+    workflow._executor.run.assert_not_called()
