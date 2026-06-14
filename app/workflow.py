@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from app.executor import CommandExecutor
+from app.llm_errors import format_llm_error
 from app.models import Command, RunContext  # Command needed for approval_gate type annotation
 from app.planner import Planner
 from app.policy import PolicyEvaluator
@@ -74,7 +75,7 @@ class AgentWorkflow:
             except Exception as exc:
                 self._log("planner_error", ctx, extra={"error": str(exc)})
                 ctx.status = "failed"
-                ctx.final_message = f"LLM error: {exc}"
+                ctx.final_message = format_llm_error(exc)
                 break
             self._log("plan", ctx, extra={
                 "iteration": iteration,
@@ -227,4 +228,3 @@ class AgentWorkflow:
             ))
         except Exception as exc:
             logger.warning("Failed to append execution audit event: %s", exc)
-
