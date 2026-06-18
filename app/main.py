@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
 from app.config import settings
 from app.executor import CommandExecutor
-from app.models import Command, RunContext, ScheduledTask, User, UserPublic
+from app.models import Command, RunContext, ScheduledTask, Team, User, UserPublic
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 from app.runs import RunRepository, _match_hint, _run_matches
@@ -31,6 +31,7 @@ from app.scheduled_tasks import ScheduledTaskRepository
 from app.secrets_store import SecretsStore
 from app.settings_store import AppSettings, AppSettingsRepository
 from app.skills import RemoteSkillRepository, SkillRepository
+from app.teams import TeamRepository, resolve_team_llm, resolve_team_skills
 from app.users import UserRepository
 from app.workflow import AgentWorkflow
 
@@ -80,21 +81,19 @@ def _make_approval_gate(run_id: str, ctx: RunContext):
         with _pending_approvals_lock:
             _pending_approvals[run_id] = approval
 
-        # Write pending_command BEFORE status so the UI never sees
-        # waiting_approval without a command to display.
         ctx.pending_command = command.model_dump()
         ctx.status = "waiting_approval"
 
         timed_out = not approval.event.wait(timeout=300)
         ctx.last_actor_id = approval.actor_id
-        
+
         if timed_out:
             with _pending_approvals_lock:
                 _pending_approvals.pop(run_id, None)
             ctx.pending_command = None
             ctx._approval_expired = True
             approval.timed_out = True
-            return False  # timed_out is authoritative; ignores any late approve
+            return False
         else:
             ctx._approval_expired = False
 
@@ -177,6 +176,7 @@ def _start_run_internal(
     skill_repo = app.state.skill_repo
     remote_skill_repo = getattr(app.state, "remote_skill_repo", None)
     run_repo = app.state.run_repo
+    team_repo = getattr(app.state, "team_repo", None)
 
     if seeded_model is None:
         app_settings_repo = getattr(app.state, "app_settings_repo", None)
@@ -197,6 +197,8 @@ def _start_run_internal(
             secrets_store=app.state.secrets_store,
             user_require_approval=current_user.require_approval,
             audit_repo=getattr(app.state, "audit_repo", None),
+            team_repo=team_repo,
+            user_id=current_user.user_id,
         )
         with _workflows_lock:
             _workflows[run_id] = workflow
@@ -278,6 +280,7 @@ async def lifespan(app: FastAPI):
             MongoRunRepository,
             MongoScheduledTaskRepository,
             MongoSkillRepository,
+            MongoTeamRepository,
             MongoUserRepository,
         )
 
@@ -294,12 +297,14 @@ async def lifespan(app: FastAPI):
         run_repo = MongoRunRepository(mongo_db)
         scheduled_task_repo = MongoScheduledTaskRepository(mongo_db)
         user_repo = MongoUserRepository(mongo_db)
+        team_repo = MongoTeamRepository(mongo_db)
     else:
         skill_repo = SkillRepository(settings.skills_file)
         app_settings_repo = AppSettingsRepository(settings.settings_file)
         run_repo = RunRepository(settings.runs_file)
         scheduled_task_repo = ScheduledTaskRepository(settings.scheduled_tasks_file)
         user_repo = UserRepository(settings.users_file)
+        team_repo = TeamRepository(settings.teams_file)
 
     # --- audit repository selection ---
     if settings.mongodb_uri:
@@ -308,14 +313,13 @@ async def lifespan(app: FastAPI):
     else:
         from app.audit import FileAuditRepository
         audit_repo = FileAuditRepository(settings.audit_file)
-    
-    app.state.audit_repo = audit_repo
 
+    app.state.audit_repo = audit_repo
     app.state.skill_repo = skill_repo
     app.state.app_settings_repo = app_settings_repo
+    app.state.team_repo = team_repo
     app_settings = app_settings_repo.load()
 
-    # Restore persisted LLM settings into in-memory state
     with _settings_lock:
         global _llm_base_url, _llm_api_key
         if app_settings.llm_base_url:
@@ -396,14 +400,14 @@ def _build_workflow(
     secrets_store: SecretsStore | None = None,
     user_require_approval: bool = False,
     audit_repo=None,
+    team_repo: TeamRepository | None = None,
+    user_id: str | None = None,
 ) -> AgentWorkflow:
-    local_skills = skill_repo.list()
-    remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
-    all_skills = remote_skills + local_skills
     gate = None
     llm_base_url = settings.llm_base_url
     llm_api_key = settings.llm_api_key
     llm_model = settings.llm_model
+
     if run_id is not None and ctx is not None:
         with _settings_lock:
             need_approval = _approval_required or user_require_approval
@@ -411,9 +415,30 @@ def _build_workflow(
             llm_api_key = _llm_api_key
         if need_approval:
             gate = _make_approval_gate(run_id, ctx)
-        # Use model from context if set, otherwise use default
         if ctx.llm_model is not None:
             llm_model = ctx.llm_model
+
+    # Resolve team-scoped skills and LLM endpoint
+    if team_repo is not None and user_id is not None:
+        team_context = resolve_team_skills(
+            user_id, team_repo, skill_repo, remote_skill_repo
+        )
+        if team_context is not None:
+            local_skills, remote_skills = team_context
+            all_skills = remote_skills + local_skills
+        else:
+            local_skills = skill_repo.list()
+            remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
+            all_skills = remote_skills + local_skills
+
+        llm_base_url, llm_api_key = resolve_team_llm(
+            user_id, team_repo, llm_base_url, llm_api_key
+        )
+    else:
+        local_skills = skill_repo.list()
+        remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
+        all_skills = remote_skills + local_skills
+
     return AgentWorkflow(
         planner=Planner(
             skill_repo,
@@ -581,6 +606,175 @@ def delete_user(
         raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
 
 
+# ── Teams ────────────────────────────────────────────────────────────────────
+
+
+class TeamCreateRequest(BaseModel):
+    name: str
+    skill_ids: list[str] = []
+    skill_repo_url: str | None = None
+    skill_repo_branch: str = "main"
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+
+
+class TeamUpdateRequest(BaseModel):
+    name: str | None = None
+    skill_ids: list[str] | None = None
+    skill_repo_url: str | None = None
+    skill_repo_branch: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+
+
+class TeamResponse(BaseModel):
+    team_id: str
+    name: str
+    user_ids: list[str]
+    skill_ids: list[str]
+    skill_repo_url: str | None
+    skill_repo_branch: str
+    llm_base_url: str | None
+    has_llm_api_key: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+def _team_response(team: Team) -> TeamResponse:
+    return TeamResponse(
+        team_id=team.team_id,
+        name=team.name,
+        user_ids=team.user_ids,
+        skill_ids=team.skill_ids,
+        skill_repo_url=team.skill_repo_url,
+        skill_repo_branch=team.skill_repo_branch,
+        llm_base_url=team.llm_base_url,
+        has_llm_api_key=bool(team.llm_api_key),
+        created_at=team.created_at,
+        updated_at=team.updated_at,
+    )
+
+
+@app.get("/api/teams", response_model=list[TeamResponse])
+def list_teams(
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> list[TeamResponse]:
+    team_repo: TeamRepository = request.app.state.team_repo
+    return [_team_response(t) for t in team_repo.list()]
+
+
+@app.post("/api/teams", status_code=201, response_model=TeamResponse)
+def create_team(
+    body: TeamCreateRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    try:
+        team = team_repo.create(
+            name=body.name,
+            skill_ids=body.skill_ids,
+            skill_repo_url=body.skill_repo_url,
+            skill_repo_branch=body.skill_repo_branch,
+            llm_base_url=body.llm_base_url,
+            llm_api_key=body.llm_api_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return _team_response(team)
+
+
+@app.get("/api/teams/{team_id}", response_model=TeamResponse)
+def get_team(
+    team_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    team = team_repo.get(team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    return _team_response(team)
+
+
+@app.put("/api/teams/{team_id}", response_model=TeamResponse)
+def update_team(
+    team_id: str,
+    body: TeamUpdateRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    team = team_repo.get(team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    kwargs: dict[str, object] = {}
+    if body.name is not None:
+        kwargs["name"] = body.name
+    if body.skill_ids is not None:
+        kwargs["skill_ids"] = body.skill_ids
+    if "skill_repo_url" in body.model_fields_set:
+        kwargs["skill_repo_url"] = body.skill_repo_url
+    if body.skill_repo_branch is not None:
+        kwargs["skill_repo_branch"] = body.skill_repo_branch
+    if "llm_base_url" in body.model_fields_set:
+        kwargs["llm_base_url"] = body.llm_base_url
+    if "llm_api_key" in body.model_fields_set:
+        kwargs["llm_api_key"] = body.llm_api_key
+    try:
+        updated = team_repo.update(team_id, **kwargs)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    return _team_response(updated)
+
+
+@app.delete("/api/teams/{team_id}", status_code=204)
+def delete_team(
+    team_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> None:
+    team_repo: TeamRepository = request.app.state.team_repo
+    try:
+        team_repo.delete(team_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+
+
+@app.post("/api/teams/{team_id}/members/{user_id}", response_model=TeamResponse)
+def add_team_member(
+    team_id: str,
+    user_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    user_repo: UserRepository = request.app.state.user_repo
+    if user_repo.get(user_id) is None:
+        raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
+    try:
+        team = team_repo.add_member(team_id, user_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    return _team_response(team)
+
+
+@app.delete("/api/teams/{team_id}/members/{user_id}", response_model=TeamResponse)
+def remove_team_member(
+    team_id: str,
+    user_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    try:
+        team = team_repo.remove_member(team_id, user_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    return _team_response(team)
+
+
 # ── Manual run ────────────────────────────────────────────────────────────────
 
 
@@ -645,7 +839,6 @@ class SearchHit(BaseModel):
 
 
 def _resolve_root_run_id(run_id: str) -> str:
-    """Walk parent_run_id chain to find the root run."""
     visited: set[str] = set()
     current = run_id
     while True:
@@ -661,7 +854,6 @@ def _resolve_root_run_id(run_id: str) -> str:
 
 @app.get("/api/agent/runs/search", response_model=list[SearchHit])
 def search_runs(q: str = "", current_user: User = Depends(get_current_user)) -> list[SearchHit]:
-    """Full-text search across all runs (prompt, summary, command history)."""
     if not q.strip():
         return []
     query = q.lower()
@@ -702,7 +894,6 @@ def list_runs(current_user: User = Depends(get_current_user)) -> list[dict]:
 
 
 def _collect_descendants(root_run_id: str) -> set[str]:
-    """Collect all descendants for a run (including root) by parent_run_id."""
     to_visit = [root_run_id]
     collected: set[str] = set()
     while to_visit:
@@ -725,18 +916,14 @@ def delete_run(run_id: str, request: Request, current_user: User = Depends(get_c
     if ctx is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
     _assert_run_access(ctx, current_user)
-
     to_delete = _collect_descendants(run_id)
-
     with _runs_lock:
         for rid in to_delete:
             _runs.pop(rid, None)
-
     for rid in to_delete:
         try:
             request.app.state.run_repo.delete(rid)
         except KeyError:
-            # Repo can be out of sync in tests/startup edge cases.
             continue
 
 
@@ -793,7 +980,6 @@ def create_scheduled_task(
     tz_name = _validate_timezone(body.timezone)
     next_run_at = _compute_next_run_at(body.cron, tz_name)
     now = datetime.now(timezone.utc)
-
     task = ScheduledTask(
         task_id=str(uuid.uuid4()),
         owner_id=current_user.user_id,
@@ -805,7 +991,6 @@ def create_scheduled_task(
         updated_at=now,
         next_run_at=next_run_at if body.enabled else None,
     )
-
     with _scheduled_tasks_lock:
         _scheduled_tasks[task.task_id] = task
     request.app.state.scheduled_task_repo.save(task)
@@ -813,10 +998,7 @@ def create_scheduled_task(
 
 
 @app.get("/api/scheduled-tasks/{task_id}", response_model=ScheduledTaskResponse)
-def get_scheduled_task(
-    task_id: str,
-    current_user: User = Depends(get_current_user),
-) -> ScheduledTaskResponse:
+def get_scheduled_task(task_id: str, current_user: User = Depends(get_current_user)) -> ScheduledTaskResponse:
     with _scheduled_tasks_lock:
         task = _scheduled_tasks.get(task_id)
     if task is None:
@@ -837,27 +1019,16 @@ def patch_scheduled_task(
     if task is None:
         raise HTTPException(status_code=404, detail=f"Scheduled task {task_id!r} not found")
     _assert_task_access(task, current_user)
-
     now = datetime.now(timezone.utc)
     prompt = task.prompt if body.prompt is None else body.prompt
     cron_expr = task.cron if body.cron is None else body.cron
     tz_name = task.timezone if body.timezone is None else _validate_timezone(body.timezone)
     enabled = task.enabled if body.enabled is None else body.enabled
-
     next_run_at = _compute_next_run_at(cron_expr, tz_name, now) if enabled else None
-
-    updated = task.model_copy(
-        update={
-            "prompt": prompt,
-            "cron": cron_expr,
-            "timezone": tz_name,
-            "enabled": enabled,
-            "next_run_at": next_run_at,
-            "updated_at": now,
-            "last_error": None,
-        }
-    )
-
+    updated = task.model_copy(update={
+        "prompt": prompt, "cron": cron_expr, "timezone": tz_name,
+        "enabled": enabled, "next_run_at": next_run_at, "updated_at": now, "last_error": None,
+    })
     with _scheduled_tasks_lock:
         _scheduled_tasks[task_id] = updated
     request.app.state.scheduled_task_repo.save(updated)
@@ -865,17 +1036,12 @@ def patch_scheduled_task(
 
 
 @app.delete("/api/scheduled-tasks/{task_id}", status_code=204)
-def delete_scheduled_task(
-    task_id: str,
-    request: Request,
-    current_user: User = Depends(get_current_user),
-) -> None:
+def delete_scheduled_task(task_id: str, request: Request, current_user: User = Depends(get_current_user)) -> None:
     with _scheduled_tasks_lock:
         task = _scheduled_tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Scheduled task {task_id!r} not found")
     _assert_task_access(task, current_user)
-
     with _scheduled_tasks_lock:
         _scheduled_tasks.pop(task_id, None)
     try:
@@ -885,28 +1051,17 @@ def delete_scheduled_task(
 
 
 @app.post("/api/scheduled-tasks/{task_id}/run", status_code=202, response_model=RunResponse)
-def run_scheduled_task_now(
-    task_id: str,
-    request: Request,
-    current_user: User = Depends(get_current_user),
-) -> RunResponse:
+def run_scheduled_task_now(task_id: str, request: Request, current_user: User = Depends(get_current_user)) -> RunResponse:
     with _scheduled_tasks_lock:
         task = _scheduled_tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Scheduled task {task_id!r} not found")
     _assert_task_access(task, current_user)
-
     user_repo = request.app.state.user_repo
     owner = user_repo.get(task.owner_id)
     if owner is None:
         raise HTTPException(status_code=404, detail=f"Owner {task.owner_id!r} not found")
-
-    run_response = _start_run_internal(
-        prompt=task.prompt,
-        app=request.app,
-        current_user=owner,
-    )
-
+    run_response = _start_run_internal(prompt=task.prompt, app=request.app, current_user=owner)
     now = datetime.now(timezone.utc)
     with _scheduled_tasks_lock:
         live = _scheduled_tasks.get(task_id)
@@ -922,7 +1077,6 @@ def run_scheduled_task_now(
                     live.next_run_at = None
                     live.last_error = str(exc.detail)
             request.app.state.scheduled_task_repo.save(live)
-
     return run_response
 
 
@@ -935,24 +1089,17 @@ class ModelsResponse(BaseModel):
 
 
 @app.get("/api/models", response_model=ModelsResponse)
-def get_models(
-    request: Request,
-    current_user: User = Depends(get_current_user),
-) -> ModelsResponse:
+def get_models(request: Request, current_user: User = Depends(get_current_user)) -> ModelsResponse:
     app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
     app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
     default_model = app_settings.default_model or settings.llm_model
-
     with _settings_lock:
         base_url = _llm_base_url
         api_key = _llm_api_key
-
-    # Normalise: strip any trailing /v1 so we always call <root>/v1/models
     base = base_url.rstrip("/")
     if base.endswith("/v1"):
         base = base[:-3]
     url = base + "/v1/models"
-
     req = urllib.request.Request(url)
     if api_key:
         req.add_header("Authorization", f"Bearer {api_key}")
@@ -963,7 +1110,6 @@ def get_models(
         raise HTTPException(status_code=502, detail=f"API returned {exc.code}: {exc.reason}") from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to reach LLM API: {exc}") from exc
-
     model_rows: list[dict] = []
     if isinstance(data, dict):
         if isinstance(data.get("data"), list):
@@ -972,17 +1118,11 @@ def get_models(
             model_rows = [m for m in data.get("models", []) if isinstance(m, dict)]
     elif isinstance(data, list):
         model_rows = [m for m in data if isinstance(m, dict)]
-
     available_models = sorted({
         str(m.get("id") or m.get("model") or "")
-        for m in model_rows
-        if (m.get("id") or m.get("model"))
+        for m in model_rows if (m.get("id") or m.get("model"))
     })
-
-    return ModelsResponse(
-        available_models=available_models,
-        default_model=default_model,
-    )
+    return ModelsResponse(available_models=available_models, default_model=default_model)
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -1016,19 +1156,15 @@ def get_settings(request: Request, current_user: User = Depends(require_admin)) 
             approval_required=_approval_required,
             llm_base_url=_llm_base_url,
             has_llm_api_key=bool(_llm_api_key),
-            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None)
-            is not None,
+            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None) is not None,
             skills_repo_url=app_settings.skills_repo_url,
             skills_repo_branch=app_settings.skills_repo_branch,
-            default_model=app_settings.default_model
-            if app_settings.default_model
-            else settings.llm_model,
+            default_model=app_settings.default_model if app_settings.default_model else settings.llm_model,
         )
 
 
 @app.get("/api/settings/approval")
 def get_approval_status(current_user: User = Depends(get_current_user)) -> dict:
-    """Returns the global approval_required flag. Accessible to all authenticated users."""
     with _settings_lock:
         return {"approval_required": _approval_required}
 
@@ -1036,56 +1172,36 @@ def get_approval_status(current_user: User = Depends(get_current_user)) -> dict:
 @app.put("/api/settings", response_model=SettingsResponse)
 def put_settings(body: SettingsPatchRequest, request: Request, current_user: User = Depends(require_admin)) -> SettingsResponse:
     global _approval_required, _llm_base_url, _llm_api_key
-
-    # ── LLM settings (in-memory + persisted) ─────────────────────────────────
     with _settings_lock:
         if body.approval_required is not None:
             _approval_required = body.approval_required
-
         if body.llm_base_url is not None:
             trimmed_url = body.llm_base_url.strip()
             if not trimmed_url:
-                raise HTTPException(
-                    status_code=422, detail="llm_base_url must not be empty"
-                )
+                raise HTTPException(status_code=422, detail="llm_base_url must not be empty")
             _llm_base_url = trimmed_url
-
         if body.llm_api_key is not None:
             _llm_api_key = body.llm_api_key.strip()
-
-    # ── Repo settings (persisted) ─────────────────────────────────────────────
-    app_settings_repo: AppSettingsRepository | None = getattr(
-        request.app.state, "app_settings_repo", None
-    )
+    app_settings_repo: AppSettingsRepository | None = getattr(request.app.state, "app_settings_repo", None)
     if app_settings_repo is None:
         app_settings_repo = AppSettingsRepository(settings.settings_file)
         request.app.state.app_settings_repo = app_settings_repo
     app_settings = app_settings_repo.load()
     settings_changed = False
-
-    # ── LLM URL + key (persisted) ─────────────────────────────────────────────
     if body.llm_base_url is not None:
         app_settings.llm_base_url = body.llm_base_url.strip() or None
         settings_changed = True
-
     if body.llm_api_key is not None:
         app_settings.llm_api_key = body.llm_api_key.strip() or None
         settings_changed = True
-
-    # ── Repo settings (persisted) ─────────────────────────────────────────────
     if "skills_repo_url" in body.model_fields_set:
         new_url = body.skills_repo_url.strip() if body.skills_repo_url else None
-        new_branch = (
-            body.skills_repo_branch.strip()
-            if body.skills_repo_branch
-            else app_settings.skills_repo_branch
-        )
+        new_branch = body.skills_repo_branch.strip() if body.skills_repo_branch else app_settings.skills_repo_branch
         app_settings.skills_repo_url = new_url
         app_settings.skills_repo_branch = new_branch
         settings_changed = True
         app_settings_repo.save(app_settings)
-        settings_changed = False  # already saved
-
+        settings_changed = False
         if new_url:
             remote_repo = RemoteSkillRepository(new_url, branch=new_branch)
             try:
@@ -1095,37 +1211,27 @@ def put_settings(body: SettingsPatchRequest, request: Request, current_user: Use
             request.app.state.remote_skill_repo = remote_repo
         else:
             request.app.state.remote_skill_repo = None
-
-    # ── Model settings (persisted) ────────────────────────────────────────────
     if "default_model" in body.model_fields_set:
         if body.default_model is None:
             app_settings.default_model = None
         else:
             trimmed_default_model = body.default_model.strip()
             if not trimmed_default_model:
-                raise HTTPException(
-                    status_code=422, detail="default_model must not be empty"
-                )
+                raise HTTPException(status_code=422, detail="default_model must not be empty")
             app_settings.default_model = trimmed_default_model
         settings_changed = True
-
     if settings_changed:
         app_settings_repo.save(app_settings)
-
     app_settings = app_settings_repo.load()
-
     with _settings_lock:
         return SettingsResponse(
             approval_required=_approval_required,
             llm_base_url=_llm_base_url,
             has_llm_api_key=bool(_llm_api_key),
-            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None)
-            is not None,
+            skills_repo_configured=getattr(request.app.state, "remote_skill_repo", None) is not None,
             skills_repo_url=app_settings.skills_repo_url,
             skills_repo_branch=app_settings.skills_repo_branch,
-            default_model=app_settings.default_model
-            if app_settings.default_model
-            else settings.llm_model,
+            default_model=app_settings.default_model if app_settings.default_model else settings.llm_model,
         )
 
 
@@ -1153,28 +1259,17 @@ def list_audit_events(
     audit_repo = getattr(request.app.state, "audit_repo", None)
     if audit_repo is None:
         return AuditQueryResponse(total=0, items=[])
-
-    from datetime import datetime
     from_ts = datetime.fromisoformat(from_) if from_ else None
     to_ts = datetime.fromisoformat(to) if to else None
     limit = min(limit, 1000)
-
-    # skill_name is only on CommandPolicyEvaluated; filter post-query
     events = audit_repo.query(
-        run_id=run_id,
-        owner_id=owner_id,
-        event_type=event_type,
-        from_ts=from_ts,
-        to_ts=to_ts,
-        limit=100_000,
-        offset=0,
+        run_id=run_id, owner_id=owner_id, event_type=event_type,
+        from_ts=from_ts, to_ts=to_ts, limit=100_000, offset=0,
     )
     if skill_name is not None:
         events = [e for e in events if getattr(e, "skill_name", None) == skill_name]
-
     total = len(events)
     page = events[offset: offset + limit]
-    
     from app.audit import _event_type_tag
     return AuditQueryResponse(
         total=total,
@@ -1183,7 +1278,6 @@ def list_audit_events(
 
 
 # ── Approval ──────────────────────────────────────────────────────────────────
-
 
 
 @app.post("/api/agent/runs/{run_id}/approve", status_code=200)
@@ -1196,9 +1290,7 @@ def approve_command(run_id: str, current_user: User = Depends(get_current_user))
     with _pending_approvals_lock:
         approval = _pending_approvals.pop(run_id, None)
     if approval is None:
-        raise HTTPException(
-            status_code=404, detail=f"No pending approval for run {run_id!r}"
-        )
+        raise HTTPException(status_code=404, detail=f"No pending approval for run {run_id!r}")
     approval.actor_id = current_user.user_id
     approval.approved = True
     approval.event.set()
@@ -1215,11 +1307,9 @@ def deny_command(run_id: str, current_user: User = Depends(get_current_user)) ->
     with _pending_approvals_lock:
         approval = _pending_approvals.pop(run_id, None)
     if approval is None:
-        raise HTTPException(
-            status_code=404, detail=f"No pending approval for run {run_id!r}"
-        )
+        raise HTTPException(status_code=404, detail=f"No pending approval for run {run_id!r}")
     approval.actor_id = current_user.user_id
-    approval.event.set()  # approved stays False
+    approval.event.set()
     return {"status": "denied"}
 
 
@@ -1233,11 +1323,8 @@ def abort_run(run_id: str, current_user: User = Depends(get_current_user)) -> di
     with _workflows_lock:
         workflow = _workflows.get(run_id)
     if workflow is None:
-        raise HTTPException(
-            status_code=404, detail=f"No active workflow for run {run_id!r}"
-        )
+        raise HTTPException(status_code=404, detail=f"No active workflow for run {run_id!r}")
     workflow.abort()
-    # Also release any pending approval so the thread unblocks
     with _pending_approvals_lock:
         approval = _pending_approvals.pop(run_id, None)
     if approval:
@@ -1257,9 +1344,7 @@ def list_skills(request: Request, current_user: User = Depends(get_current_user)
 def sync_remote_skills(request: Request, current_user: User = Depends(require_admin)) -> dict:
     remote_repo = getattr(request.app.state, "remote_skill_repo", None)
     if remote_repo is None:
-        raise HTTPException(
-            status_code=404, detail="No remote skill repository configured"
-        )
+        raise HTTPException(status_code=404, detail="No remote skill repository configured")
     try:
         remote_repo.sync()
     except RuntimeError as exc:
@@ -1275,18 +1360,9 @@ def generate_policy_endpoint(body: GeneratePolicyRequest, request: Request, curr
     app_settings_repo = getattr(request.app.state, "app_settings_repo", None)
     app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
     llm_model = app_settings.default_model or settings.llm_model
-    planner = Planner(
-        request.app.state.skill_repo,
-        llm_base_url=llm_base_url,
-        llm_api_key=llm_api_key,
-        llm_model=llm_model,
-    )
+    planner = Planner(request.app.state.skill_repo, llm_base_url=llm_base_url, llm_api_key=llm_api_key, llm_model=llm_model)
     try:
-        policy = planner.generate_policy(
-            skill_name=body.skill_name,
-            skill_description=body.skill_description,
-            plain_description=body.description,
-        )
+        policy = planner.generate_policy(skill_name=body.skill_name, skill_description=body.skill_description, plain_description=body.description)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}") from exc
     return {"policy": policy}
@@ -1306,17 +1382,8 @@ def create_skill(body: SkillCreateRequest, request: Request, current_user: User 
     if remote_repo:
         remote_names = {s.name.lower() for s in remote_repo.list_skills()}
         if body.name.lower() in remote_names:
-            raise HTTPException(
-                status_code=409,
-                detail=f"A remote skill with name {body.name!r} already exists and cannot be overridden",
-            )
-    skill = request.app.state.skill_repo.create(
-        name=body.name,
-        description=body.description,
-        enabled=body.enabled,
-        policy=body.policy,
-        env=body.env,
-    )
+            raise HTTPException(status_code=409, detail=f"A remote skill with name {body.name!r} already exists and cannot be overridden")
+    skill = request.app.state.skill_repo.create(name=body.name, description=body.description, enabled=body.enabled, policy=body.policy, env=body.env)
     return skill.model_dump(mode="json")
 
 
@@ -1326,22 +1393,14 @@ def patch_skill(skill_id: str, body: SkillPatchRequest, request: Request, curren
     if remote_repo:
         remote_ids = {s.id for s in remote_repo.list_skills()}
         if skill_id in remote_ids:
-            raise HTTPException(
-                status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)"
-            )
+            raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)")
     try:
         kwargs = {}
         if "policy" in body.model_fields_set:
             kwargs["policy"] = body.policy
         if "env" in body.model_fields_set:
             kwargs["env"] = body.env
-        skill = request.app.state.skill_repo.update(
-            skill_id,
-            name=body.name,
-            description=body.description,
-            enabled=body.enabled,
-            **kwargs,
-        )
+        skill = request.app.state.skill_repo.update(skill_id, name=body.name, description=body.description, enabled=body.enabled, **kwargs)
         return skill.model_dump(mode="json")
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} not found")
@@ -1353,9 +1412,7 @@ def delete_skill(skill_id: str, request: Request, current_user: User = Depends(r
     if remote_repo:
         remote_ids = {s.id for s in remote_repo.list_skills()}
         if skill_id in remote_ids:
-            raise HTTPException(
-                status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)"
-            )
+            raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)")
     try:
         request.app.state.skill_repo.delete(skill_id)
     except KeyError:
@@ -1381,20 +1438,14 @@ class RunSkillPatchRequest(BaseModel):
 
 
 def _run_skill_response(skill, overrides: dict[str, bool]) -> RunSkillResponse:
-    # Remote skills are always effectively enabled — overrides do not apply.
     if skill.source == "remote":
         effective: bool = True
     else:
         effective = bool(overrides.get(skill.id, skill.enabled))
     return RunSkillResponse(
-        id=skill.id,
-        name=skill.name,
-        description=skill.description,
-        enabled=skill.enabled,
-        effective_enabled=effective,
-        policy=skill.policy,
-        source=skill.source,
-        created_at=skill.created_at,
+        id=skill.id, name=skill.name, description=skill.description,
+        enabled=skill.enabled, effective_enabled=effective,
+        policy=skill.policy, source=skill.source, created_at=skill.created_at,
     )
 
 
@@ -1410,13 +1461,7 @@ def get_run_skills(run_id: str, request: Request, current_user: User = Depends(g
 
 
 @app.patch("/api/agent/runs/{run_id}/skills/{skill_id}")
-def patch_run_skill(
-    run_id: str,
-    skill_id: str,
-    body: RunSkillPatchRequest,
-    request: Request,
-    current_user: User = Depends(get_current_user),
-) -> RunSkillResponse:
+def patch_run_skill(run_id: str, skill_id: str, body: RunSkillPatchRequest, request: Request, current_user: User = Depends(get_current_user)) -> RunSkillResponse:
     with _runs_lock:
         ctx = _runs.get(run_id)
     if ctx is None:
@@ -1426,10 +1471,7 @@ def patch_run_skill(
     if skill is None:
         raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} not found")
     if skill.source == "remote":
-        raise HTTPException(
-            status_code=403,
-            detail=f"Remote skill {skill_id!r} cannot be deactivated",
-        )
+        raise HTTPException(status_code=403, detail=f"Remote skill {skill_id!r} cannot be deactivated")
     with _runs_lock:
         ctx.skill_overrides[skill_id] = body.enabled
     request.app.state.run_repo.save(ctx)
@@ -1449,6 +1491,5 @@ def index() -> FileResponse:
     return FileResponse(_STATIC_DIR / "index.html", media_type="text/html")
 
 
-# Serve Vite build assets (JS/CSS bundles) — must be registered after API routes
 if (_STATIC_DIR / "assets").exists():
     app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="assets")

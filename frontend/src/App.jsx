@@ -5,12 +5,10 @@ import ConvSkillsBar from './components/ConvSkillsBar'
 import SkillsModal from './components/SkillsModal'
 import ScheduledTasksModal from './components/ScheduledTasksModal'
 import UsersModal from './components/UsersModal'
+import TeamsModal from './components/TeamsModal'
 import { useAuth } from './AuthContext'
 import Login from './Login'
-// Shadows the global fetch in this module so all API calls get 401 interception
 import { apiFetch as fetch } from './apiFetch'
-
-// ── Pure helpers ───────────────────────────────────────
 
 export function getRoots(runs, runOrder) {
   return runOrder.filter(id => !runs[id]?.parent_run_id)
@@ -34,9 +32,6 @@ export function getChainTailStatus(runs, runOrder, rootId) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
-// ── App ────────────────────────────────────────────────
-
-// All authenticated UI lives here so hooks are never called conditionally.
 function MainApp({ user, logout }) {
   const [runs, setRuns] = useState({})
   const [runOrder, setRunOrder] = useState([])
@@ -44,25 +39,20 @@ function MainApp({ user, logout }) {
   const [skillsModalOpen, setSkillsModalOpen] = useState(false)
   const [scheduledTasksModalOpen, setScheduledTasksModalOpen] = useState(false)
   const [usersModalOpen, setUsersModalOpen] = useState(false)
+  const [teamsModalOpen, setTeamsModalOpen] = useState(false)
   const [convSkillsData, setConvSkillsData] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
 
   const pendingOverridesRef = useRef({})
   const pollingRef = useRef(new Set())
-
-  // Keep mutable refs in sync for use inside async polling callbacks
   const runsRef = useRef(runs)
   const runOrderRef = useRef(runOrder)
   useEffect(() => { runsRef.current = runs }, [runs])
   useEffect(() => { runOrderRef.current = runOrder }, [runOrder])
 
-  // Debounced keyword search across all runs
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([])
-      return
-    }
+    if (!searchQuery.trim()) { setSearchResults([]); return }
     const tid = setTimeout(async () => {
       try {
         const res = await fetch('/api/agent/runs/search?q=' + encodeURIComponent(searchQuery))
@@ -101,9 +91,7 @@ function MainApp({ user, logout }) {
         setConvSkillsData(await res.json())
       } else {
         const fallback = await fetch('/api/skills')
-        setConvSkillsData(fallback.ok
-          ? (await fallback.json()).map(s => ({ ...s, effective_enabled: s.enabled }))
-          : [])
+        setConvSkillsData(fallback.ok ? (await fallback.json()).map(s => ({ ...s, effective_enabled: s.enabled })) : [])
       }
     } catch { setConvSkillsData([]) }
   }, [])
@@ -112,9 +100,7 @@ function MainApp({ user, logout }) {
     pendingOverridesRef.current = {}
     try {
       const res = await fetch('/api/skills')
-      setConvSkillsData(res.ok
-        ? (await res.json()).map(s => ({ ...s, effective_enabled: s.enabled }))
-        : [])
+      setConvSkillsData(res.ok ? (await res.json()).map(s => ({ ...s, effective_enabled: s.enabled })) : [])
     } catch { setConvSkillsData([]) }
   }, [])
 
@@ -123,143 +109,80 @@ function MainApp({ user, logout }) {
       const res = await fetch('/api/agent/runs')
       if (!res.ok) return
       const list = await res.json()
-
-      setRuns(prev => {
-        const next = { ...prev }
-        for (const run of list) next[run.run_id] = run
-        return next
-      })
+      setRuns(prev => { const next = { ...prev }; for (const run of list) next[run.run_id] = run; return next })
       setRunOrder(prev => {
-        const ids = new Set(prev)
-        const next = [...prev]
-        for (const run of list) {
-          if (!ids.has(run.run_id)) {
-            next.push(run.run_id)
-            ids.add(run.run_id)
-          }
-        }
+        const ids = new Set(prev); const next = [...prev]
+        for (const run of list) { if (!ids.has(run.run_id)) { next.push(run.run_id); ids.add(run.run_id) } }
         return next
       })
-
       for (const run of list) {
-        if (run.status === 'running' || run.status === 'waiting_approval') {
-          pollRun(run.run_id)
-        }
+        if (run.status === 'running' || run.status === 'waiting_approval') pollRun(run.run_id)
       }
-
       if (initialize) {
-        const initialRuns = {}
-        const initialOrder = []
-        for (const run of list) {
-          initialRuns[run.run_id] = run
-          initialOrder.push(run.run_id)
-        }
+        const initialRuns = {}; const initialOrder = []
+        for (const run of list) { initialRuns[run.run_id] = run; initialOrder.push(run.run_id) }
         const roots = initialOrder.filter(id => !initialRuns[id]?.parent_run_id)
         if (roots.length > 0) {
           const rootId = roots[roots.length - 1]
           setSelectedRootId(rootId)
-          let current = rootId
-          let tailId = rootId
+          let current = rootId; let tailId = rootId
           while (current) {
             tailId = current
             const next = initialOrder.find(id => initialRuns[id]?.parent_run_id === current) ?? null
             current = next
           }
           loadConvSkills(tailId)
-        } else {
-          loadConvSkillsForNewChat()
-        }
+        } else { loadConvSkillsForNewChat() }
       }
     } catch {}
   }, [pollRun, loadConvSkills, loadConvSkillsForNewChat])
 
-  // Initial load + periodic sync so scheduler-created runs appear without refresh
   useEffect(() => {
     syncRuns(true)
     const intervalId = setInterval(() => { syncRuns(false) }, 3000)
     return () => clearInterval(intervalId)
   }, [syncRuns])
 
-  const newChat = useCallback(() => {
-    setSelectedRootId(null)
-    loadConvSkillsForNewChat()
-  }, [loadConvSkillsForNewChat])
+  const newChat = useCallback(() => { setSelectedRootId(null); loadConvSkillsForNewChat() }, [loadConvSkillsForNewChat])
 
   const selectConversation = useCallback((rootId) => {
     setSelectedRootId(rootId)
     const chain = getChain(runsRef.current, runOrderRef.current, rootId)
-    const tailId = chain[chain.length - 1]
-    loadConvSkills(tailId)
+    loadConvSkills(chain[chain.length - 1])
   }, [loadConvSkills])
 
   const deleteConversation = useCallback(async (rootId) => {
     try {
       const res = await fetch('/api/agent/runs/' + rootId, { method: 'DELETE' })
       if (!res.ok) throw new Error('HTTP ' + res.status)
-
       const chain = getChain(runsRef.current, runOrderRef.current, rootId)
       const removeIds = new Set(chain)
-      setRuns(prev => {
-        const next = { ...prev }
-        for (const rid of removeIds) delete next[rid]
-        return next
-      })
+      setRuns(prev => { const next = { ...prev }; for (const rid of removeIds) delete next[rid]; return next })
       setRunOrder(prev => prev.filter(id => !removeIds.has(id)))
-      setSelectedRootId(prev => {
-        if (prev === rootId) {
-          loadConvSkillsForNewChat()
-          return null
-        }
-        return prev
-      })
-    } catch (e) {
-      alert('Failed to delete conversation: ' + e.message)
-    }
+      setSelectedRootId(prev => { if (prev === rootId) { loadConvSkillsForNewChat(); return null } return prev })
+    } catch (e) { alert('Failed to delete conversation: ' + e.message) }
   }, [loadConvSkillsForNewChat])
 
   const applyPendingOverrides = useCallback(async (runId) => {
     const entries = Object.entries(pendingOverridesRef.current)
     if (entries.length === 0) return
     await Promise.all(entries.map(([skillId, enabled]) =>
-      fetch(`/api/agent/runs/${runId}/skills/${skillId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      })
+      fetch(`/api/agent/runs/${runId}/skills/${skillId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) })
     ))
     pendingOverridesRef.current = {}
   }, [])
 
   const submitRun = useCallback(async (prompt) => {
-    const chain = selectedRootId
-      ? getChain(runsRef.current, runOrderRef.current, selectedRootId)
-      : []
+    const chain = selectedRootId ? getChain(runsRef.current, runOrderRef.current, selectedRootId) : []
     const contextRunId = chain.length > 0 ? chain[chain.length - 1] : null
-    const inheritedHistoryLength = contextRunId
-      ? (runsRef.current[contextRunId]?.history?.length ?? 0)
-      : 0
-
+    const inheritedHistoryLength = contextRunId ? (runsRef.current[contextRunId]?.history?.length ?? 0) : 0
     const body = { prompt }
     if (contextRunId) body.context_run_id = contextRunId
-
-    const res = await fetch('/api/agent/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const res = await fetch('/api/agent/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     if (!res.ok) throw new Error('HTTP ' + res.status)
     const data = await res.json()
-
-    upsertRun({
-      run_id: data.run_id,
-      prompt,
-      status: 'running',
-      history: [],
-      history_start_index: inheritedHistoryLength,
-      parent_run_id: contextRunId,
-    })
+    upsertRun({ run_id: data.run_id, prompt, status: 'running', history: [], history_start_index: inheritedHistoryLength, parent_run_id: contextRunId })
     if (!contextRunId) setSelectedRootId(data.run_id)
-
     await applyPendingOverrides(data.run_id)
     pollRun(data.run_id)
     loadConvSkills(data.run_id)
@@ -274,11 +197,7 @@ function MainApp({ user, logout }) {
       return
     }
     try {
-      const res = await fetch(`/api/agent/runs/${tailRunId}/skills/${skill.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !skill.effective_enabled }),
-      })
+      const res = await fetch(`/api/agent/runs/${tailRunId}/skills/${skill.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !skill.effective_enabled }) })
       if (!res.ok) return
       await loadConvSkills(tailRunId)
     } catch {}
@@ -299,14 +218,7 @@ function MainApp({ user, logout }) {
 
   const handleScheduledRunCreated = useCallback((run) => {
     if (!run?.run_id) return
-    upsertRun({
-      run_id: run.run_id,
-      prompt: run.prompt || 'Scheduled run',
-      status: run.status || 'running',
-      history: [],
-      history_start_index: 0,
-      parent_run_id: null,
-    })
+    upsertRun({ run_id: run.run_id, prompt: run.prompt || 'Scheduled run', status: run.status || 'running', history: [], history_start_index: 0, parent_run_id: null })
     setSelectedRootId(run.run_id)
     pollRun(run.run_id)
   }, [upsertRun, pollRun])
@@ -318,61 +230,31 @@ function MainApp({ user, logout }) {
   return (
     <>
       <Sidebar
-        runs={runs}
-        runOrder={runOrder}
-        selectedRootId={selectedRootId}
-        onNewChat={newChat}
-        onSelectConversation={selectConversation}
-        onDeleteConversation={deleteConversation}
-        onOpenSettings={() => setSkillsModalOpen(true)}
-        searchQuery={searchQuery}
-        searchResults={searchResults}
-        onSearch={setSearchQuery}
-        user={user}
-        onLogout={logout}
+        runs={runs} runOrder={runOrder} selectedRootId={selectedRootId}
+        onNewChat={newChat} onSelectConversation={selectConversation}
+        onDeleteConversation={deleteConversation} onOpenSettings={() => setSkillsModalOpen(true)}
+        searchQuery={searchQuery} searchResults={searchResults} onSearch={setSearchQuery}
+        user={user} onLogout={logout}
         onOpenScheduledTasksModal={() => setScheduledTasksModalOpen(true)}
         onOpenUsersModal={user?.role === 'admin' ? () => setUsersModalOpen(true) : null}
+        onOpenTeamsModal={user?.role === 'admin' ? () => setTeamsModalOpen(true) : null}
       />
       <div className="main">
-        <ConversationFeed
-          runs={runs}
-          chain={chain}
-          tailRun={tailRun}
-          onApprove={handleApprove}
-          onDeny={handleDeny}
-          onSubmit={submitRun}
-        />
-        <ConvSkillsBar
-          tailRunId={tailRunId}
-          convSkillsData={convSkillsData}
-          onToggleSkill={toggleConvSkill}
-        />
+        <ConversationFeed runs={runs} chain={chain} tailRun={tailRun} onApprove={handleApprove} onDeny={handleDeny} onSubmit={submitRun} />
+        <ConvSkillsBar tailRunId={tailRunId} convSkillsData={convSkillsData} onToggleSkill={toggleConvSkill} />
       </div>
       {skillsModalOpen && (
-        <SkillsModal onClose={() => {
-          setSkillsModalOpen(false)
-
-          if (tailRunId) {
-            loadConvSkills(tailRunId)
-          } else {
-            loadConvSkillsForNewChat()
-          }
-        }} />
+        <SkillsModal onClose={() => { setSkillsModalOpen(false); tailRunId ? loadConvSkills(tailRunId) : loadConvSkillsForNewChat() }} />
       )}
       {scheduledTasksModalOpen && (
-        <ScheduledTasksModal
-          onRunCreated={handleScheduledRunCreated}
-          onClose={() => setScheduledTasksModalOpen(false)}
-        />
+        <ScheduledTasksModal onRunCreated={handleScheduledRunCreated} onClose={() => setScheduledTasksModalOpen(false)} />
       )}
-      {user?.role === 'admin' && usersModalOpen && (
-        <UsersModal onClose={() => setUsersModalOpen(false)} />
-      )}
+      {user?.role === 'admin' && usersModalOpen && <UsersModal onClose={() => setUsersModalOpen(false)} />}
+      {user?.role === 'admin' && teamsModalOpen && <TeamsModal onClose={() => setTeamsModalOpen(false)} />}
     </>
   )
 }
 
-// Auth gate — renders loading or Login before the full app mounts.
 export default function App() {
   const { user, logout } = useAuth()
   if (user === undefined) return <div className="auth-loading">Authenticating…</div>
