@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import re
 
+import ssl
+
+import httpx
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -157,11 +160,16 @@ class Planner:
         self._skill_repo = skill_repo
         self._remote_skills: list = remote_skills or []
         effective_api_key = llm_api_key if llm_api_key is not None else settings.llm_api_key
+        ssl_ctx = ssl.create_default_context()
+        if settings.llm_ca_bundle:
+            ssl_ctx.load_verify_locations(cafile=settings.llm_ca_bundle)
+        http_client = httpx.Client(verify=ssl_ctx)
         llm = ChatOpenAI(
             base_url=llm_base_url or settings.llm_base_url,
             api_key=SecretStr(effective_api_key) if effective_api_key else None,
             model=llm_model or settings.llm_model,
             temperature=0,
+            http_client=http_client,
         )
         prompt = ChatPromptTemplate.from_messages([
             ("system", "{system_prompt}"),
