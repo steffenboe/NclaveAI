@@ -21,6 +21,7 @@ class Skill(BaseModel):
     enabled: bool = True
     policy: str | None = None   # rego rule bodies; None = no OPA authorization
     env: list[str] = []         # env var names forwarded to subprocess at execution time
+    team_id: str | None = None  # assigned to a team (None = global, visible to everyone)
     created_at: datetime
     source: str = "local"       # "local" | "remote" — not persisted in skills.json
 
@@ -71,7 +72,7 @@ class SkillRepository:
                 return i
         raise KeyError(id)
 
-    def create(self, name: str, description: str, enabled: bool = True, policy: str | None = None, env: list[str] | None = None) -> Skill:
+    def create(self, name: str, description: str, enabled: bool = True, policy: str | None = None, env: list[str] | None = None, team_id: str | None = None) -> Skill:
         skill = Skill(
             id=str(uuid.uuid4()),
             name=name,
@@ -79,6 +80,7 @@ class SkillRepository:
             enabled=enabled,
             policy=policy,
             env=env or [],
+            team_id=team_id,
             created_at=datetime.now(timezone.utc),
         )
         self._skills.append(skill)
@@ -94,6 +96,7 @@ class SkillRepository:
         enabled: bool | None = None,
         policy: object = _UNSET,
         env: object = _UNSET,
+        team_id: object = _UNSET,
     ) -> Skill:
         idx = self._find_index(id)  # raises KeyError if not found
         updates: dict = {}
@@ -107,6 +110,8 @@ class SkillRepository:
             updates["policy"] = policy
         if env is not _UNSET:
             updates["env"] = env
+        if team_id is not _UNSET:      # None is a valid value — removes team assignment
+            updates["team_id"] = team_id
         updated = self._skills[idx].model_copy(update=updates)
         self._skills[idx] = updated
         self._save()

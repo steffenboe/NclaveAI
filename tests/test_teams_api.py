@@ -143,3 +143,284 @@ class TestTeamRBAC:
             assert client.get("/api/teams").status_code == 403
         finally:
             app.dependency_overrides.pop(get_current_user, None)
+
+
+class TestTeamSkillVisibility:
+    """Tests for team-based skill visibility: users not in a group cannot see skills assigned to groups."""
+
+    def _get_user_id(self, client, username):
+        return next(u["user_id"] for u in client.get("/api/users").json() if u["username"] == username)
+
+    def test_user_in_team_sees_team_skills(self, client_with_teams):
+        """A user in a team should see skills assigned to that team."""
+        from app.auth import get_current_user
+        from app.main import app
+        from app.models import User
+        from datetime import datetime, timezone
+        from app.skills import Skill
+
+        # Create skills
+        alice_id = self._get_user_id(client_with_teams, "alice")
+        skill_repo = app.state.skill_repo
+        skill1 = skill_repo.create(name="skill-a", description="Skill A")
+        skill2 = skill_repo.create(name="skill-b", description="Skill B")
+
+        # Create team and add skill + user
+        team = client_with_teams.post("/api/teams", json={"name": "TeamA"}).json()
+        client_with_teams.put(f"/api/teams/{team['team_id']}", json={"skill_ids": [skill1.id]})
+        client_with_teams.post(f"/api/teams/{team['team_id']}/members/{alice_id}")
+
+        # Override current user to alice
+        regular_user = User(user_id=alice_id, username="alice", hashed_password="", role="user", created_at=datetime.now(timezone.utc))
+        app.dependency_overrides[get_current_user] = lambda: regular_user
+        try:
+            skills = client_with_teams.get("/api/skills").json()
+            skill_ids = {s["id"] for s in skills}
+            assert skill1.id in skill_ids, "User in team should see team skill"
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_user_not_in_team_cannot_see_team_skills(self, client_with_teams):
+        """A user not in a team should not see skills assigned to that team."""
+        from app.auth import get_current_user
+        from app.main import app
+        from app.models import User
+        from datetime import datetime, timezone
+
+        # Create skills
+        alice_id = self._get_user_id(client_with_teams, "alice")
+        bob_id = self._get_user_id(client_with_teams, "bob")
+        skill_repo = app.state.skill_repo
+        skill1 = skill_repo.create(name="secret-skill", description="Secret Skill")
+        skill2 = skill_repo.create(name="public-skill", description="Public Skill")
+
+        # Create team with alice, assign secret skill to team
+        team = client_with_teams.post("/api/teams", json={"name": "SecretTeam"}).json()
+        client_with_teams.put(f"/api/teams/{team['team_id']}", json={"skill_ids": [skill1.id]})
+        client_with_teams.post(f"/api/teams/{team['team_id']}/members/{alice_id}")
+
+        # Override current user to bob (not in team)
+        regular_user = User(user_id=bob_id, username="bob", hashed_password="", role="user", created_at=datetime.now(timezone.utc))
+        app.dependency_overrides[get_current_user] = lambda: regular_user
+        try:
+            skills = client_with_teams.get("/api/skills").json()
+            skill_ids = {s["id"] for s in skills}
+            assert skill1.id not in skill_ids, "User not in team should not see team skill"
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_user_in_multiple_teams_sees_all_team_skills(self, client_with_teams):
+        """A user in multiple teams should see skills from all their teams."""
+        from app.auth import get_current_user
+        from app.main import app
+        from app.models import User
+        from datetime import datetime, timezone
+
+        alice_id = self._get_user_id(client_with_teams, "alice")
+        skill_repo = app.state.skill_repo
+        skill1 = skill_repo.create(name="skill-team1", description="Skill Team 1")
+        skill2 = skill_repo.create(name="skill-team2", description="Skill Team 2")
+
+        # Create two teams and assign different skills
+        team1 = client_with_teams.post("/api/teams", json={"name": "Team1"}).json()
+        team2 = client_with_teams.post("/api/teams", json={"name": "Team2"}).json()
+        client_with_teams.put(f"/api/teams/{team1['team_id']}", json={"skill_ids": [skill1.id]})
+        client_with_teams.put(f"/api/teams/{team2['team_id']}", json={"skill_ids": [skill2.id]})
+
+        # Add alice to both teams
+        client_with_teams.post(f"/api/teams/{team1['team_id']}/members/{alice_id}")
+        client_with_teams.post(f"/api/teams/{team2['team_id']}/members/{alice_id}")
+
+        # Override current user to alice
+        regular_user = User(user_id=alice_id, username="alice", hashed_password="", role="user", created_at=datetime.now(timezone.utc))
+        app.dependency_overrides[get_current_user] = lambda: regular_user
+        try:
+            skills = client_with_teams.get("/api/skills").json()
+            skill_ids = {s["id"] for s in skills}
+            assert skill1.id in skill_ids, "User in team1 should see skill1"
+            assert skill2.id in skill_ids, "User in team2 should see skill2"
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_user_not_in_any_team_cannot_use_skills(self, client_with_teams):
+        """A user not in any team should not see any team-assigned skills."""
+        from app.auth import get_current_user
+        from app.main import app
+        from app.models import User
+        from datetime import datetime, timezone
+
+        bob_id = self._get_user_id(client_with_teams, "bob")
+        alice_id = self._get_user_id(client_with_teams, "alice")
+        skill_repo = app.state.skill_repo
+        skill1 = skill_repo.create(name="team-exclusive-skill", description="Team Exclusive")
+
+        # Create team with alice, assign skill
+        team = client_with_teams.post("/api/teams", json={"name": "ExclusiveTeam"}).json()
+        client_with_teams.put(f"/api/teams/{team['team_id']}", json={"skill_ids": [skill1.id]})
+        client_with_teams.post(f"/api/teams/{team['team_id']}/members/{alice_id}")
+
+        # Override current user to bob (not in any team)
+        regular_user = User(user_id=bob_id, username="bob", hashed_password="", role="user", created_at=datetime.now(timezone.utc))
+        app.dependency_overrides[get_current_user] = lambda: regular_user
+        try:
+            skills = client_with_teams.get("/api/skills").json()
+            skill_ids = {s["id"] for s in skills}
+            assert skill1.id not in skill_ids, "User not in any team should not see team-exclusive skill"
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_admin_sees_team_assigned_skills(self, client_with_teams):
+        """Admins should see all skills, including team-assigned ones, in settings."""
+        from app.auth import get_current_user
+        from app.main import app
+        from app.models import User
+        from datetime import datetime, timezone
+
+        skill_repo = app.state.skill_repo
+        team_skill = skill_repo.create(name="team-visible-for-admin", description="Team Skill")
+        global_skill = skill_repo.create(name="global-visible-for-admin", description="Global Skill")
+
+        team = client_with_teams.post("/api/teams", json={"name": "AdminCheckTeam"}).json()
+        client_with_teams.put(f"/api/teams/{team['team_id']}", json={"skill_ids": [team_skill.id]})
+
+        admin_user = User(
+            user_id="admin-id",
+            username="admin",
+            hashed_password="",
+            role="admin",
+            created_at=datetime.now(timezone.utc),
+        )
+        app.dependency_overrides[get_current_user] = lambda: admin_user
+        try:
+            skills = client_with_teams.get("/api/skills").json()
+            skill_ids = {s["id"] for s in skills}
+            assert team_skill.id in skill_ids
+            assert global_skill.id in skill_ids
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+
+class TestSkillTeamAssignment:
+    """Tests for the new skill.team_id model: skills can only be assigned to one team."""
+
+    def _get_user_id(self, client, username):
+        return next(u["user_id"] for u in client.get("/api/users").json() if u["username"] == username)
+
+    def test_global_skills_visible_to_everyone(self, client_with_teams):
+        """Global skills (team_id = None) should be visible to everyone."""
+        from app.auth import get_current_user
+        from app.main import app
+        from app.models import User
+        from datetime import datetime, timezone
+
+        alice_id = self._get_user_id(client_with_teams, "alice")
+        bob_id = self._get_user_id(client_with_teams, "bob")
+        skill_repo = app.state.skill_repo
+        
+        # Create a global skill (team_id = None)
+        global_skill = skill_repo.create(name="global-skill", description="Global Skill", team_id=None)
+        
+        # Create team with alice but assign no skills
+        team = client_with_teams.post("/api/teams", json={"name": "TeamA"}).json()
+        client_with_teams.post(f"/api/teams/{team['team_id']}/members/{alice_id}")
+
+        # Test alice (in team) sees global skill
+        regular_user = User(user_id=alice_id, username="alice", hashed_password="", role="user", created_at=datetime.now(timezone.utc))
+        app.dependency_overrides[get_current_user] = lambda: regular_user
+        try:
+            skills = client_with_teams.get("/api/skills").json()
+            skill_ids = {s["id"] for s in skills}
+            assert global_skill.id in skill_ids, "Team member should see global skill"
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+        # Test bob (not in team) sees global skill
+        regular_user = User(user_id=bob_id, username="bob", hashed_password="", role="user", created_at=datetime.now(timezone.utc))
+        app.dependency_overrides[get_current_user] = lambda: regular_user
+        try:
+            skills = client_with_teams.get("/api/skills").json()
+            skill_ids = {s["id"] for s in skills}
+            assert global_skill.id in skill_ids, "Non-team member should see global skill"
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_skill_team_id_synced_with_team_skill_ids(self, client_with_teams):
+        """When updating team.skill_ids, skill.team_id should be updated accordingly."""
+        from app.main import app
+
+        skill_repo = app.state.skill_repo
+        
+        # Create two skills
+        skill1 = skill_repo.create(name="skill1", description="Skill 1")
+        skill2 = skill_repo.create(name="skill2", description="Skill 2")
+        
+        # Create team and assign skill1
+        team = client_with_teams.post("/api/teams", json={"name": "T"}).json()
+        client_with_teams.put(f"/api/teams/{team['team_id']}", json={"skill_ids": [skill1.id]})
+        
+        # Check that skill1.team_id is set to team_id
+        updated_skill1 = skill_repo.get(skill1.id)
+        assert updated_skill1.team_id == team['team_id'], "Skill should be assigned to team"
+        
+        # Now update team to assign skill2 instead
+        client_with_teams.put(f"/api/teams/{team['team_id']}", json={"skill_ids": [skill2.id]})
+        
+        # skill1.team_id should be cleared
+        updated_skill1 = skill_repo.get(skill1.id)
+        assert updated_skill1.team_id is None, "Skill should be unassigned from team"
+        
+        # skill2.team_id should be set
+        updated_skill2 = skill_repo.get(skill2.id)
+        assert updated_skill2.team_id == team['team_id'], "Skill should be assigned to team"
+
+    def test_create_skill_with_team_id(self, client_with_teams):
+        """Admin can create a skill directly assigned to a team."""
+        from app.main import app
+
+        # Create team
+        team = client_with_teams.post("/api/teams", json={"name": "T"}).json()
+        
+        # Create skill with team_id
+        r = client_with_teams.post("/api/skills", json={
+            "name": "team-skill",
+            "description": "Team Skill",
+            "team_id": team['team_id']
+        })
+        assert r.status_code == 201
+        skill_data = r.json()
+        assert skill_data["team_id"] == team['team_id'], "Skill should have team_id set"
+
+    def test_update_skill_team_id(self, client_with_teams):
+        """Admin can update a skill's team_id."""
+        from app.main import app
+
+        skill_repo = app.state.skill_repo
+        
+        # Create skill without team
+        skill = skill_repo.create(name="skill", description="Skill")
+        assert skill.team_id is None
+        
+        # Create team
+        team = client_with_teams.post("/api/teams", json={"name": "T"}).json()
+        
+        # Update skill to assign to team
+        r = client_with_teams.patch(f"/api/skills/{skill.id}", json={"team_id": team['team_id']})
+        assert r.status_code == 200
+        skill_data = r.json()
+        assert skill_data["team_id"] == team['team_id'], "Skill should be assigned to team"
+
+    def test_skill_unassigned_from_team_becomes_global(self, client_with_teams):
+        """When a skill's team_id is set to None, it becomes global."""
+        from app.main import app
+
+        skill_repo = app.state.skill_repo
+        
+        # Create team and skill
+        team = client_with_teams.post("/api/teams", json={"name": "T"}).json()
+        skill = skill_repo.create(name="skill", description="Skill", team_id=team['team_id'])
+        
+        # Update skill to remove team assignment
+        r = client_with_teams.patch(f"/api/skills/{skill.id}", json={"team_id": None})
+        assert r.status_code == 200
+        skill_data = r.json()
+        assert skill_data["team_id"] is None, "Skill should be global"

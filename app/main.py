@@ -706,6 +706,7 @@ def update_team(
     current_user: User = Depends(require_admin),
 ) -> TeamResponse:
     team_repo: TeamRepository = request.app.state.team_repo
+    skill_repo = request.app.state.skill_repo
     team = team_repo.get(team_id)
     if team is None:
         raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
@@ -714,6 +715,22 @@ def update_team(
         kwargs["name"] = body.name
     if body.skill_ids is not None:
         kwargs["skill_ids"] = body.skill_ids
+        # Sync skill.team_id with team.skill_ids
+        # Old skills (previously assigned to this team): clear their team_id
+        for skill in skill_repo.list():
+            if skill.team_id == team_id and skill.id not in body.skill_ids:
+                skill_repo.update(skill.id, team_id=None)
+        # New skills: set their team_id to this team
+        for skill_id in body.skill_ids:
+            try:
+                skill = skill_repo.get(skill_id)
+                # Only update if team_id is None or already set to this team
+                if skill.team_id is None or skill.team_id == team_id:
+                    skill_repo.update(skill_id, team_id=team_id)
+                # If skill is assigned to a different team, don't override
+                # (enforce single-team assignment)
+            except KeyError:
+                pass  # skill doesn't exist, skip
     if "skill_repo_url" in body.model_fields_set:
         kwargs["skill_repo_url"] = body.skill_repo_url
     if body.skill_repo_branch is not None:
@@ -803,6 +820,7 @@ class SkillCreateRequest(BaseModel):
     enabled: bool = True
     policy: str | None = None
     env: list[str] | None = None
+    team_id: str | None = None
 
 
 class SkillPatchRequest(BaseModel):
@@ -811,6 +829,7 @@ class SkillPatchRequest(BaseModel):
     enabled: bool | None = None
     policy: str | None = None
     env: list[str] | None = None
+    team_id: str | None = None
 
 
 class GeneratePolicyRequest(BaseModel):
@@ -1337,7 +1356,58 @@ def abort_run(run_id: str, current_user: User = Depends(get_current_user)) -> di
 
 @app.get("/api/skills")
 def list_skills(request: Request, current_user: User = Depends(get_current_user)) -> list:
-    return [s.model_dump(mode="json") for s in _all_skills(request)]
+    """List skills visible to the current user.
+    
+    Visibility rules:
+    - Global skills (team_id = None) are visible to everyone
+    - Team skills (team_id != None) are visible only to team members
+    """
+    team_repo = getattr(request.app.state, "team_repo", None)
+    skill_repo = request.app.state.skill_repo
+    remote_skill_repo = getattr(request.app.state, "remote_skill_repo", None)
+
+    all_local_skills = skill_repo.list()
+    all_remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
+
+    # Backward compatibility: derive team assignment from team.skill_ids for older data.
+    # This also repairs persisted local skills that still miss team_id.
+    assignment_by_skill_id: dict[str, str] = {}
+    if team_repo is not None:
+        for team in team_repo.list():
+            for skill_id in team.skill_ids:
+                assignment_by_skill_id.setdefault(skill_id, team.team_id)
+
+    normalized_local_skills = []
+    for skill in all_local_skills:
+        effective_team_id = skill.team_id or assignment_by_skill_id.get(skill.id)
+        if effective_team_id != skill.team_id:
+            try:
+                skill_repo.update(skill.id, team_id=effective_team_id)
+            except KeyError:
+                pass
+            skill = skill.model_copy(update={"team_id": effective_team_id})
+        normalized_local_skills.append(skill)
+
+    # Admin needs full visibility for settings/management.
+    if current_user.role == "admin":
+        return [s.model_dump(mode="json") for s in (all_remote_skills + normalized_local_skills)]
+
+    if team_repo is None:
+        return [s.model_dump(mode="json") for s in (all_remote_skills + normalized_local_skills)]
+
+    user_team_ids = {t.team_id for t in team_repo.list_by_user(current_user.user_id)}
+
+    filtered_local_skills = [
+        s for s in normalized_local_skills
+        if s.team_id is None or s.team_id in user_team_ids
+    ]
+
+    filtered_remote_skills = [
+        s for s in all_remote_skills
+        if s.team_id is None or s.team_id in user_team_ids
+    ]
+
+    return [s.model_dump(mode="json") for s in (filtered_remote_skills + filtered_local_skills)]
 
 
 @app.post("/api/skills/sync")
@@ -1383,7 +1453,12 @@ def create_skill(body: SkillCreateRequest, request: Request, current_user: User 
         remote_names = {s.name.lower() for s in remote_repo.list_skills()}
         if body.name.lower() in remote_names:
             raise HTTPException(status_code=409, detail=f"A remote skill with name {body.name!r} already exists and cannot be overridden")
-    skill = request.app.state.skill_repo.create(name=body.name, description=body.description, enabled=body.enabled, policy=body.policy, env=body.env)
+    # Validate team_id if provided
+    if body.team_id:
+        team_repo = getattr(request.app.state, "team_repo", None)
+        if team_repo and not team_repo.get(body.team_id):
+            raise HTTPException(status_code=404, detail=f"Team {body.team_id!r} not found")
+    skill = request.app.state.skill_repo.create(name=body.name, description=body.description, enabled=body.enabled, policy=body.policy, env=body.env, team_id=body.team_id)
     return skill.model_dump(mode="json")
 
 
@@ -1394,12 +1469,19 @@ def patch_skill(skill_id: str, body: SkillPatchRequest, request: Request, curren
         remote_ids = {s.id for s in remote_repo.list_skills()}
         if skill_id in remote_ids:
             raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} is read-only (remote)")
+    # Validate team_id if provided
+    if "team_id" in body.model_fields_set and body.team_id:
+        team_repo = getattr(request.app.state, "team_repo", None)
+        if team_repo and not team_repo.get(body.team_id):
+            raise HTTPException(status_code=404, detail=f"Team {body.team_id!r} not found")
     try:
         kwargs = {}
         if "policy" in body.model_fields_set:
             kwargs["policy"] = body.policy
         if "env" in body.model_fields_set:
             kwargs["env"] = body.env
+        if "team_id" in body.model_fields_set:
+            kwargs["team_id"] = body.team_id
         skill = request.app.state.skill_repo.update(skill_id, name=body.name, description=body.description, enabled=body.enabled, **kwargs)
         return skill.model_dump(mode="json")
     except KeyError:

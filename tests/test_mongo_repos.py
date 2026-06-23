@@ -277,6 +277,20 @@ class TestMongoSkillRepository:
         updated = repo.update(skill.id, policy=None)
         assert updated.policy is None
 
+    def test_create_with_team_id(self, mongo_db):
+        repo = MongoSkillRepository(mongo_db)
+        skill = repo.create("team-skill", "desc", team_id="team-1")
+        assert skill.team_id == "team-1"
+        assert repo.get(skill.id).team_id == "team-1"
+
+    def test_update_team_id(self, mongo_db):
+        repo = MongoSkillRepository(mongo_db)
+        skill = repo.create("s", "d")
+        updated = repo.update(skill.id, team_id="team-1")
+        assert updated.team_id == "team-1"
+        updated = repo.update(skill.id, team_id=None)
+        assert updated.team_id is None
+
     def test_update_raises_key_error_when_missing(self, mongo_db):
         repo = MongoSkillRepository(mongo_db)
         with pytest.raises(KeyError):

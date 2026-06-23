@@ -202,6 +202,7 @@ class MongoSkillRepository:
         enabled: bool = True,
         policy: str | None = None,
         env: list[str] | None = None,
+        team_id: str | None = None,
     ) -> Skill:
         skill = Skill(
             id=str(uuid.uuid4()),
@@ -210,6 +211,7 @@ class MongoSkillRepository:
             enabled=enabled,
             policy=policy,
             env=env or [],
+            team_id=team_id,
             created_at=datetime.now(timezone.utc),
         )
         doc = skill.model_dump(mode="json", exclude={"source"})
@@ -226,6 +228,7 @@ class MongoSkillRepository:
         enabled: bool | None = None,
         policy: object = _UNSET,
         env: object = _UNSET,
+        team_id: object = _UNSET,
     ) -> Skill:
         if not self._col.find_one({"_id": id}):
             raise KeyError(id)
@@ -240,6 +243,8 @@ class MongoSkillRepository:
             updates["policy"] = policy
         if env is not _UNSET:
             updates["env"] = env
+        if team_id is not _UNSET:
+            updates["team_id"] = team_id
         if updates:
             self._col.update_one({"_id": id}, {"$set": updates})
         doc = self._col.find_one({"_id": id})
