@@ -28,6 +28,7 @@ export default function SkillsModal({ onClose }) {
   const [availableModels, setAvailableModels] = useState([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [fetchModelsError, setFetchModelsError] = useState('')
+  const [teams, setTeams] = useState([])
   // skillForm: null = hidden, {} = new skill, { skill } = editing existing
   const [skillForm, setSkillForm] = useState(null)
   const [form, setForm] = useState({ name: '', description: '', policy: '' })
@@ -53,6 +54,7 @@ export default function SkillsModal({ onClose }) {
         .then(d => { if (d) setGlobalApprovalRequired(d.approval_required) })
         .catch(() => {})
     }
+    loadTeams()
     loadSkills()
   }, [])
 
@@ -95,6 +97,13 @@ export default function SkillsModal({ onClose }) {
     try {
       const res = await fetch('/api/skills')
       if (res.ok) setSkills(await res.json())
+    } catch {}
+  }
+
+  async function loadTeams() {
+    try {
+      const res = await fetch('/api/teams')
+      if (res.ok) setTeams(await res.json())
     } catch {}
   }
 
@@ -370,6 +379,75 @@ export default function SkillsModal({ onClose }) {
 
   const isEdit = skillForm !== null && 'skill' in skillForm
 
+  const skillsByGroup = (() => {
+    const grouped = {}
+    for (const skill of skills) {
+      const key = skill.team_id || '__global__'
+      if (!grouped[key]) grouped[key] = []
+      grouped[key].push(skill)
+    }
+
+    const groups = []
+    if (grouped.__global__) {
+      groups.push({ key: '__global__', title: 'Global Skills', items: grouped.__global__ })
+      delete grouped.__global__
+    }
+
+    for (const [teamId, items] of Object.entries(grouped)) {
+      const team = teams.find(t => t.team_id === teamId)
+      groups.push({ key: teamId, title: team?.name || `Team ${teamId}`, items })
+    }
+
+    return groups
+  })()
+
+  function renderSkillCard(skill) {
+    return (
+      <div key={skill.id} className="skill-card">
+        <div className="skill-info">
+          <div className="skill-name">
+            {skill.name}
+            {skill.source === 'remote' && (
+              <span className="remote-badge">remote</span>
+            )}
+          </div>
+          <div className="skill-desc">{skill.description}</div>
+          <span className={'policy-badge ' + (skill.policy ? 'has-policy' : 'no-policy')}>
+            {skill.policy ? 'policy set' : 'no policy'}
+          </span>
+        </div>
+        <div className="skill-actions">
+          {skill.source === 'remote' ? (
+            <>
+              <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
+                {skill.enabled ? 'enabled' : 'disabled'}
+              </span>
+              <button className="btn-sm btn-secondary" onClick={() => setDetailSkill(d => d?.id === skill.id ? null : skill)}>Details</button>
+            </>
+          ) : isAdmin ? (
+            <>
+              <button
+                className={'toggle-enabled' + (skill.enabled ? ' on' : '')}
+                onClick={() => toggleSkill(skill)}
+              >
+                {skill.enabled ? 'enabled' : 'disabled'}
+              </button>
+              <button className="btn-sm btn-secondary" onClick={() => showSkillForm(skill)}>Edit</button>
+              <button className="btn-sm btn-danger" onClick={() => deleteSkill(skill.id)}>Del</button>
+            </>
+          ) : (
+            <>
+              <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
+                {skill.enabled ? 'enabled' : 'disabled'}
+              </span>
+              <button className="btn-sm btn-secondary" onClick={() => setDetailSkill(d => d?.id === skill.id ? null : skill)}>Details</button>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal">
@@ -616,49 +694,13 @@ export default function SkillsModal({ onClose }) {
           <div>
             {skills.length === 0
               ? <div className="no-items-msg">No skills yet.</div>
-              : skills.map(skill => (
-                  <div key={skill.id} className="skill-card">
-                    <div className="skill-info">
-                      <div className="skill-name">
-                        {skill.name}
-                        {skill.source === 'remote' && (
-                          <span className="remote-badge">remote</span>
-                        )}
-                      </div>
-                      <div className="skill-desc">{skill.description}</div>
-                      <span className={'policy-badge ' + (skill.policy ? 'has-policy' : 'no-policy')}>
-                        {skill.policy ? 'policy set' : 'no policy'}
-                      </span>
+              : skillsByGroup.map((group, idx) => (
+                  <details key={group.key} className="skill-group" open={idx === 0}>
+                    <summary className="skill-group-title">{group.title} ({group.items.length})</summary>
+                    <div className="skill-group-content">
+                      {group.items.map(skill => renderSkillCard(skill))}
                     </div>
-                    <div className="skill-actions">
-                      {skill.source === 'remote' ? (
-                        <>
-                          <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
-                            {skill.enabled ? 'enabled' : 'disabled'}
-                          </span>
-                          <button className="btn-sm btn-secondary" onClick={() => setDetailSkill(d => d?.id === skill.id ? null : skill)}>Details</button>
-                        </>
-                      ) : isAdmin ? (
-                        <>
-                          <button
-                            className={'toggle-enabled' + (skill.enabled ? ' on' : '')}
-                            onClick={() => toggleSkill(skill)}
-                          >
-                            {skill.enabled ? 'enabled' : 'disabled'}
-                          </button>
-                          <button className="btn-sm btn-secondary" onClick={() => showSkillForm(skill)}>Edit</button>
-                          <button className="btn-sm btn-danger" onClick={() => deleteSkill(skill.id)}>Del</button>
-                        </>
-                      ) : (
-                        <>
-                          <span className={'toggle-enabled readonly' + (skill.enabled ? ' on' : '')}>
-                            {skill.enabled ? 'enabled' : 'disabled'}
-                          </span>
-                          <button className="btn-sm btn-secondary" onClick={() => setDetailSkill(d => d?.id === skill.id ? null : skill)}>Details</button>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                  </details>
                 ))
             }
           </div>
