@@ -38,5 +38,7 @@ class Settings(BaseSettings):
 
     mongodb_db_name: str = "nclaveai"
 
+    llm_ca_bundle: str | None = None
+
 
 settings = Settings()

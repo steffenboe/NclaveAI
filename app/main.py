@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import ssl
 import threading
 import urllib.error
 import urllib.request
@@ -956,8 +957,11 @@ def get_models(
     req = urllib.request.Request(url)
     if api_key:
         req.add_header("Authorization", f"Bearer {api_key}")
+    ssl_ctx = ssl.create_default_context()
+    if settings.llm_ca_bundle:
+        ssl_ctx.load_verify_locations(cafile=settings.llm_ca_bundle)
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"API returned {exc.code}: {exc.reason}") from exc
