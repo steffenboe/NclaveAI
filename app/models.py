@@ -24,6 +24,19 @@ class UserPublic(BaseModel):
     require_approval: bool = False
 
 
+class Team(BaseModel):
+    team_id: str
+    name: str
+    user_ids: list[str] = []
+    skill_ids: list[str] = []
+    skill_repo_url: str | None = None
+    skill_repo_branch: str = "main"
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class Command(BaseModel):
     argv: Annotated[list[str], Field(min_length=1)]
     rationale: str

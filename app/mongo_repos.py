@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from pymongo.database import Database
 
-from app.models import RunContext, ScheduledTask, User
+from app.models import RunContext, ScheduledTask, Team, User
 from app.runs import _run_matches
 from app.settings_store import AppSettings
 from app.skills import Skill
@@ -275,3 +275,103 @@ class MongoAppSettingsRepository:
         doc = s.model_dump(mode="json")
         doc["_id"] = self._DOC_ID
         self._col.replace_one({"_id": self._DOC_ID}, doc, upsert=True)
+
+
+class MongoTeamRepository:
+    """MongoDB-backed team repository. Same interface as TeamRepository."""
+
+    def __init__(self, db: Database) -> None:
+        self._col = db["teams"]
+
+    def _from_doc(self, doc: dict) -> Team:
+        d = dict(doc)
+        d.pop("_id", None)
+        return Team.model_validate(d)
+
+    def _to_doc(self, team: Team) -> dict:
+        doc = team.model_dump(mode="json")
+        doc["_id"] = team.team_id
+        return doc
+
+    def create(
+        self,
+        name: str,
+        skill_ids: list[str] | None = None,
+        skill_repo_url: str | None = None,
+        skill_repo_branch: str = "main",
+        llm_base_url: str | None = None,
+        llm_api_key: str | None = None,
+    ) -> Team:
+        if self._col.find_one({"name": name}):
+            raise ValueError(f"Team {name!r} already exists")
+        now = datetime.now(timezone.utc)
+        team = Team(
+            team_id=str(uuid.uuid4()),
+            name=name,
+            user_ids=[],
+            skill_ids=skill_ids or [],
+            skill_repo_url=skill_repo_url,
+            skill_repo_branch=skill_repo_branch,
+            llm_base_url=llm_base_url,
+            llm_api_key=llm_api_key,
+            created_at=now,
+            updated_at=now,
+        )
+        self._col.insert_one(self._to_doc(team))
+        return team
+
+    def get(self, team_id: str) -> Team | None:
+        doc = self._col.find_one({"_id": team_id})
+        return self._from_doc(doc) if doc else None
+
+    def list(self) -> list[Team]:
+        return [self._from_doc(d) for d in self._col.find().sort("created_at", 1)]
+
+    def list_by_user(self, user_id: str) -> list[Team]:
+        return [
+            self._from_doc(d)
+            for d in self._col.find({"user_ids": user_id}).sort("created_at", 1)
+        ]
+
+    def update(self, team_id: str, **kwargs: object) -> Team:
+        kwargs["updated_at"] = datetime.now(timezone.utc).isoformat()
+        result = self._col.find_one_and_update(
+            {"_id": team_id},
+            {"$set": kwargs},
+            return_document=True,
+        )
+        if result is None:
+            raise KeyError(f"Team {team_id!r} not found")
+        return self._from_doc(result)
+
+    def delete(self, team_id: str) -> None:
+        result = self._col.delete_one({"_id": team_id})
+        if result.deleted_count == 0:
+            raise KeyError(f"Team {team_id!r} not found")
+
+    def add_member(self, team_id: str, user_id: str) -> Team:
+        result = self._col.find_one_and_update(
+            {"_id": team_id},
+            {
+                "$addToSet": {"user_ids": user_id},
+                "$set": {"updated_at": datetime.now(timezone.utc).isoformat()},
+            },
+            return_document=True,
+        )
+        if result is None:
+            raise KeyError(f"Team {team_id!r} not found")
+        return self._from_doc(result)
+
+    def remove_member(self, team_id: str, user_id: str) -> Team:
+        result = self._col.find_one_and_update(
+            {"_id": team_id},
+            {
+                "$pull": {"user_ids": user_id},
+                "$set": {"updated_at": datetime.now(timezone.utc).isoformat()},
+            },
+            return_document=True,
+        )
+        if result is None:
+            raise KeyError(f"Team {team_id!r} not found")
+        return self._from_doc(result)
+

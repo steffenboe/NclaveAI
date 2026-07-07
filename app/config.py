@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     users_file: Path = Path("./users.json")
 
+    teams_file: Path = Path("./teams.json")
+
     audit_file: Path = Path("./audit.jsonl")
 
     jwt_secret: str = "change-me-in-production"
