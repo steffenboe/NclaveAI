@@ -5,6 +5,7 @@ import ConvSkillsBar from './components/ConvSkillsBar'
 import SkillsModal from './components/SkillsModal'
 import ScheduledTasksModal from './components/ScheduledTasksModal'
 import UsersModal from './components/UsersModal'
+import TeamsModal from './components/TeamsModal'
 import { useAuth } from './AuthContext'
 import Login from './Login'
 // Shadows the global fetch in this module so all API calls get 401 interception
@@ -44,6 +45,7 @@ function MainApp({ user, logout }) {
   const [skillsModalOpen, setSkillsModalOpen] = useState(false)
   const [scheduledTasksModalOpen, setScheduledTasksModalOpen] = useState(false)
   const [usersModalOpen, setUsersModalOpen] = useState(false)
+  const [teamsModalOpen, setTeamsModalOpen] = useState(false)
   const [convSkillsData, setConvSkillsData] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
@@ -332,6 +334,7 @@ function MainApp({ user, logout }) {
         onLogout={logout}
         onOpenScheduledTasksModal={() => setScheduledTasksModalOpen(true)}
         onOpenUsersModal={user?.role === 'admin' ? () => setUsersModalOpen(true) : null}
+        onOpenTeamsModal={user?.role === 'admin' ? () => setTeamsModalOpen(true) : null}
       />
       <div className="main">
         <ConversationFeed
@@ -367,6 +370,9 @@ function MainApp({ user, logout }) {
       )}
       {user?.role === 'admin' && usersModalOpen && (
         <UsersModal onClose={() => setUsersModalOpen(false)} />
+      )}
+      {user?.role === 'admin' && teamsModalOpen && (
+        <TeamsModal onClose={() => setTeamsModalOpen(false)} />
       )}
     </>
   )

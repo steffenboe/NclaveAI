@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
 from app.config import settings
 from app.executor import CommandExecutor
-from app.models import Command, RunContext, ScheduledTask, User, UserPublic
+from app.models import Command, RunContext, ScheduledTask, Team, User, UserPublic
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 from app.runs import RunRepository, _match_hint, _run_matches
@@ -32,6 +32,7 @@ from app.scheduled_tasks import ScheduledTaskRepository
 from app.secrets_store import SecretsStore
 from app.settings_store import AppSettings, AppSettingsRepository
 from app.skills import RemoteSkillRepository, SkillRepository
+from app.teams import TeamRepository, get_team_assigned_skill_ids, resolve_team_llm, resolve_team_skills
 from app.users import UserRepository
 from app.workflow import AgentWorkflow
 
@@ -198,6 +199,9 @@ def _start_run_internal(
             secrets_store=app.state.secrets_store,
             user_require_approval=current_user.require_approval,
             audit_repo=getattr(app.state, "audit_repo", None),
+            team_repo=getattr(app.state, "team_repo", None),
+            user_id=current_user.user_id,
+            team_remote_repos=getattr(app.state, "team_remote_repos", {}),
         )
         with _workflows_lock:
             _workflows[run_id] = workflow
@@ -295,13 +299,15 @@ async def lifespan(app: FastAPI):
         run_repo = MongoRunRepository(mongo_db)
         scheduled_task_repo = MongoScheduledTaskRepository(mongo_db)
         user_repo = MongoUserRepository(mongo_db)
+        from app.mongo_repos import MongoTeamRepository
+        team_repo: TeamRepository = MongoTeamRepository(mongo_db)
     else:
         skill_repo = SkillRepository(settings.skills_file)
         app_settings_repo = AppSettingsRepository(settings.settings_file)
         run_repo = RunRepository(settings.runs_file)
         scheduled_task_repo = ScheduledTaskRepository(settings.scheduled_tasks_file)
         user_repo = UserRepository(settings.users_file)
-
+        team_repo = TeamRepository(settings.teams_file)
     # --- audit repository selection ---
     if settings.mongodb_uri:
         from app.audit import MongoAuditRepository
@@ -336,6 +342,23 @@ async def lifespan(app: FastAPI):
             logger.info("Remote skills loaded from %s", app_settings.skills_repo_url)
         except Exception as exc:
             logger.warning("Failed to load remote skills: %s", exc)
+
+    # Sync per-team remote skill repositories once at startup
+    import asyncio as _asyncio
+    app.state.team_repo = team_repo
+    team_remote_repos: dict[str, RemoteSkillRepository] = {}
+    for _team in team_repo.list():
+        _url = _team.skill_repo_url
+        if not _url or _url in team_remote_repos:
+            continue
+        _repo = RemoteSkillRepository(_url, branch=_team.skill_repo_branch)
+        try:
+            await _asyncio.to_thread(_repo.sync)
+            team_remote_repos[_url] = _repo
+            logger.info("Team remote skills loaded from %s", _url)
+        except Exception as exc:
+            logger.warning("Failed to load team remote skills from %s: %s", _url, exc)
+    app.state.team_remote_repos = team_remote_repos
 
     app.state.run_repo = run_repo
     app.state.scheduled_task_repo = scheduled_task_repo
@@ -389,6 +412,38 @@ def _all_skills(request: Request) -> list:
     return remote + local
 
 
+def _skills_for_user(request: Request, current_user: User) -> list:
+    """Return the skills visible to the given user, applying team filtering.
+
+    Admins always receive the full unfiltered set (for management UIs).
+    Regular users receive the same filtered set as _build_workflow produces:
+      - team member  → union of their teams' skill_ids + team remote repos
+      - no team      → global skills, excluding any skill assigned to a team
+    """
+    if current_user.role == "admin":
+        return _all_skills(request)
+
+    skill_repo: SkillRepository = request.app.state.skill_repo
+    team_repo = getattr(request.app.state, "team_repo", None)
+    team_remote_repos: dict = getattr(request.app.state, "team_remote_repos", {})
+    remote_skill_repo = getattr(request.app.state, "remote_skill_repo", None)
+
+    if team_repo is None:
+        return _all_skills(request)
+
+    team_context = resolve_team_skills(
+        current_user.user_id, team_repo, skill_repo, team_remote_repos
+    )
+    if team_context is not None:
+        local_skills, remote_skills = team_context
+    else:
+        team_assigned = get_team_assigned_skill_ids(team_repo)
+        local_skills = [s for s in skill_repo.list() if s.id not in team_assigned]
+        remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
+
+    return remote_skills + local_skills
+
+
 def _build_workflow(
     skill_repo: SkillRepository,
     run_id: str | None = None,
@@ -397,10 +452,12 @@ def _build_workflow(
     secrets_store: SecretsStore | None = None,
     user_require_approval: bool = False,
     audit_repo=None,
+    team_repo: TeamRepository | None = None,
+    user_id: str | None = None,
+    team_remote_repos: dict | None = None,
 ) -> AgentWorkflow:
     local_skills = skill_repo.list()
     remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
-    all_skills = remote_skills + local_skills
     gate = None
     llm_base_url = settings.llm_base_url
     llm_api_key = settings.llm_api_key
@@ -415,9 +472,29 @@ def _build_workflow(
         # Use model from context if set, otherwise use default
         if ctx.llm_model is not None:
             llm_model = ctx.llm_model
+
+    # Apply team-scoped skill and LLM filtering
+    if team_repo is not None and user_id is not None:
+        team_context = resolve_team_skills(
+            user_id, team_repo, skill_repo, team_remote_repos or {}
+        )
+        if team_context is not None:
+            # User has team membership → skills are the union of their teams
+            local_skills, remote_skills = team_context
+        else:
+            # No team membership → global skills, but exclude any skill already
+            # assigned to a team (those are team-private)
+            team_assigned = get_team_assigned_skill_ids(team_repo)
+            local_skills = [s for s in local_skills if s.id not in team_assigned]
+        llm_base_url, llm_api_key = resolve_team_llm(
+            user_id, team_repo, llm_base_url, llm_api_key
+        )
+
+    all_skills = remote_skills + local_skills
     return AgentWorkflow(
         planner=Planner(
             skill_repo,
+            local_skills=local_skills,
             remote_skills=remote_skills,
             llm_base_url=llm_base_url,
             llm_api_key=llm_api_key,
@@ -582,6 +659,177 @@ def delete_user(
         raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
 
 
+# ── Teams ─────────────────────────────────────────────────────────────────────
+
+
+class TeamCreateRequest(BaseModel):
+    name: str
+    skill_ids: list[str] = []
+    skill_repo_url: str | None = None
+    skill_repo_branch: str = "main"
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+
+
+class TeamUpdateRequest(BaseModel):
+    name: str | None = None
+    skill_ids: list[str] | None = None
+    skill_repo_url: str | None = None
+    skill_repo_branch: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+
+
+class TeamResponse(BaseModel):
+    team_id: str
+    name: str
+    user_ids: list[str]
+    skill_ids: list[str]
+    skill_repo_url: str | None
+    skill_repo_branch: str
+    llm_base_url: str | None
+    has_llm_api_key: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+def _team_response(team: Team) -> TeamResponse:
+    return TeamResponse(
+        team_id=team.team_id,
+        name=team.name,
+        user_ids=team.user_ids,
+        skill_ids=team.skill_ids,
+        skill_repo_url=team.skill_repo_url,
+        skill_repo_branch=team.skill_repo_branch,
+        llm_base_url=team.llm_base_url,
+        has_llm_api_key=bool(team.llm_api_key),
+        created_at=team.created_at,
+        updated_at=team.updated_at,
+    )
+
+
+@app.get("/api/teams", response_model=list[TeamResponse])
+def list_teams(
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> list[TeamResponse]:
+    team_repo: TeamRepository = request.app.state.team_repo
+    return [_team_response(t) for t in team_repo.list()]
+
+
+@app.post("/api/teams", status_code=201, response_model=TeamResponse)
+def create_team(
+    body: TeamCreateRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    try:
+        team = team_repo.create(
+            name=body.name,
+            skill_ids=body.skill_ids,
+            skill_repo_url=body.skill_repo_url,
+            skill_repo_branch=body.skill_repo_branch,
+            llm_base_url=body.llm_base_url,
+            llm_api_key=body.llm_api_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return _team_response(team)
+
+
+@app.get("/api/teams/{team_id}", response_model=TeamResponse)
+def get_team(
+    team_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    team = team_repo.get(team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    return _team_response(team)
+
+
+@app.put("/api/teams/{team_id}", response_model=TeamResponse)
+def update_team(
+    team_id: str,
+    body: TeamUpdateRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    if team_repo.get(team_id) is None:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    kwargs: dict[str, object] = {}
+    if body.name is not None:
+        kwargs["name"] = body.name
+    if body.skill_ids is not None:
+        kwargs["skill_ids"] = body.skill_ids
+    if "skill_repo_url" in body.model_fields_set:
+        kwargs["skill_repo_url"] = body.skill_repo_url
+    if body.skill_repo_branch is not None:
+        kwargs["skill_repo_branch"] = body.skill_repo_branch
+    if "llm_base_url" in body.model_fields_set:
+        kwargs["llm_base_url"] = body.llm_base_url
+    if "llm_api_key" in body.model_fields_set:
+        kwargs["llm_api_key"] = body.llm_api_key
+    try:
+        updated = team_repo.update(team_id, **kwargs)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    return _team_response(updated)
+
+
+@app.delete("/api/teams/{team_id}", status_code=204)
+def delete_team(
+    team_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> None:
+    team_repo: TeamRepository = request.app.state.team_repo
+    try:
+        team_repo.delete(team_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+
+
+@app.post("/api/teams/{team_id}/members/{user_id}", response_model=TeamResponse)
+def add_team_member(
+    team_id: str,
+    user_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    user_repo: UserRepository = request.app.state.user_repo
+    if user_repo.get(user_id) is None:
+        raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
+    try:
+        team = team_repo.add_member(team_id, user_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    return _team_response(team)
+
+
+@app.delete("/api/teams/{team_id}/members/{user_id}", response_model=TeamResponse)
+def remove_team_member(
+    team_id: str,
+    user_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> TeamResponse:
+    team_repo: TeamRepository = request.app.state.team_repo
+    user_repo: UserRepository = request.app.state.user_repo
+    if user_repo.get(user_id) is None:
+        raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
+    try:
+        team = team_repo.remove_member(team_id, user_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} not found")
+    return _team_response(team)
+
+
 # ── Manual run ────────────────────────────────────────────────────────────────
 
 
@@ -670,7 +918,7 @@ def search_runs(q: str = "", current_user: User = Depends(get_current_user)) -> 
         runs_snapshot = list(_runs.values())
     hits: list[SearchHit] = []
     for ctx in runs_snapshot:
-        if current_user.role != "admin" and ctx.owner_id != current_user.user_id:
+        if ctx.owner_id != current_user.user_id:
             continue
         if _run_matches(ctx, query):
             hits.append(SearchHit(
@@ -697,8 +945,7 @@ def get_run(run_id: str, current_user: User = Depends(get_current_user)) -> Any:
 def list_runs(current_user: User = Depends(get_current_user)) -> list[dict]:
     with _runs_lock:
         runs = list(_runs.values())
-    if current_user.role != "admin":
-        runs = [ctx for ctx in runs if ctx.owner_id == current_user.user_id]
+    runs = [ctx for ctx in runs if ctx.owner_id == current_user.user_id]
     return [ctx.model_dump() for ctx in runs]
 
 
@@ -1254,7 +1501,7 @@ def abort_run(run_id: str, current_user: User = Depends(get_current_user)) -> di
 
 @app.get("/api/skills")
 def list_skills(request: Request, current_user: User = Depends(get_current_user)) -> list:
-    return [s.model_dump(mode="json") for s in _all_skills(request)]
+    return [s.model_dump(mode="json") for s in _skills_for_user(request, current_user)]
 
 
 @app.post("/api/skills/sync")
@@ -1409,7 +1656,7 @@ def get_run_skills(run_id: str, request: Request, current_user: User = Depends(g
     if ctx is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
     _assert_run_access(ctx, current_user)
-    skills = _all_skills(request)
+    skills = _skills_for_user(request, current_user)
     return [_run_skill_response(s, ctx.skill_overrides) for s in skills]
 
 

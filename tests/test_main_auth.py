@@ -79,11 +79,16 @@ class TestRunOwnership:
         assert resp.status_code == 404
 
     def test_admin_can_see_all_runs(self, client):
+        # Admins see only their own runs in the list (same as regular users).
+        # Access to individual runs by ID is still unrestricted for admins.
         run_id = self._create_run_as(client, "alice", "Alice123!")
 
         client.post("/api/auth/login", json={"username": "admin", "password": "Admin123!"})
         runs = client.get("/api/agent/runs").json()
-        assert any(r["run_id"] == run_id for r in runs)
+        # Admin's own list does not include Alice's run
+        assert not any(r["run_id"] == run_id for r in runs)
+        # But admin can still fetch it directly
+        assert client.get(f"/api/agent/runs/{run_id}").status_code == 200
 
     def test_user_can_see_own_run(self, client):
         client.post("/api/auth/login", json={"username": "alice", "password": "Alice123!"})

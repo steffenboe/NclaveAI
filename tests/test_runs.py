@@ -273,7 +273,7 @@ def test_runs_survive_restart(tmp_path):
 
     # First "session": save a completed run
     repo1 = RunRepository(runs_path)
-    ctx = RunContext(run_id="r-persist", prompt="survives?", status="done", final_message="yes")
+    ctx = RunContext(run_id="r-persist", prompt="survives?", status="done", final_message="yes", owner_id="test-admin-id")
     repo1.save(ctx)
 
     # Second "session": simulate restart by creating a new repo + populating _runs
