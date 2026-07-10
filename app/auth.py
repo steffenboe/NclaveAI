@@ -5,7 +5,8 @@ from typing import Any
 
 import bcrypt
 import jwt
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Cookie, Depends, HTTPException, Request, Security, status
+from fastapi.security import APIKeyHeader
 
 from app.config import settings
 from app.models import User
@@ -86,3 +87,86 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
             detail="Admin access required",
         )
     return current_user
+
+
+# ── API-key authentication ────────────────────────────────────────────────────
+
+_api_key_header = APIKeyHeader(name="X-Api-Key", auto_error=False)
+
+
+def get_user_from_api_key(
+    request: Request,
+    api_key: str | None = Security(_api_key_header),
+) -> User:
+    """Resolve the caller's identity from an *X-Api-Key* header.
+
+    Raises HTTP 401 when the header is absent or the key is invalid.
+    Updates *last_used_at* on every successful authentication.
+    """
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key required (X-Api-Key header)",
+        )
+
+    from app.api_keys import ApiKeyRepository, hash_api_key
+
+    api_key_repo: ApiKeyRepository | None = getattr(request.app.state, "api_key_repo", None)
+    if api_key_repo is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API key store not available",
+        )
+
+    hashed = hash_api_key(api_key)
+    stored = api_key_repo.get_by_hash(hashed)
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key",
+        )
+
+    user_repo = request.app.state.user_repo
+    user: User | None = user_repo.get(stored.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User associated with this API key no longer exists",
+        )
+
+    # Fire-and-forget timestamp update — non-fatal if it fails
+    try:
+        api_key_repo.touch(stored.key_id)
+    except Exception:
+        pass
+
+    return user
+
+
+def get_current_user_or_api_key(
+    request: Request,
+    access_token: str | None = Cookie(default=None),
+    api_key: str | None = Security(_api_key_header),
+) -> User:
+    """Accept either a session cookie **or** an X-Api-Key header.
+
+    Tries cookie auth first; falls back to API key auth.
+    Raises HTTP 401 if neither credential is present or valid.
+    """
+    if access_token:
+        try:
+            payload = verify_token(access_token)
+            user_id: str = payload.get("sub", "")
+            user = request.app.state.user_repo.get(user_id)
+            if user is not None:
+                return user
+        except ValueError:
+            pass  # fall through to API key
+
+    if api_key:
+        return get_user_from_api_key(request, api_key)
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+    )

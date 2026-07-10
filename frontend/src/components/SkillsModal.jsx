@@ -38,6 +38,13 @@ export default function SkillsModal({ onClose }) {
   const [detailSkill, setDetailSkill] = useState(null)
   const detailSkillRef = useRef(null)
 
+  // API keys
+  const [apiKeys, setApiKeys] = useState([])
+  const [newKeyName, setNewKeyName] = useState('')
+  const [creatingKey, setCreatingKey] = useState(false)
+  const [newlyCreatedKey, setNewlyCreatedKey] = useState(null)
+  const [keyCopied, setKeyCopied] = useState(false)
+
   useEffect(() => {
     detailSkillRef.current = detailSkill
   }, [detailSkill])
@@ -54,6 +61,7 @@ export default function SkillsModal({ onClose }) {
         .catch(() => {})
     }
     loadSkills()
+    loadApiKeys()
   }, [])
 
   useEffect(() => {
@@ -96,6 +104,52 @@ export default function SkillsModal({ onClose }) {
       const res = await fetch('/api/skills')
       if (res.ok) setSkills(await res.json())
     } catch {}
+  }
+
+  async function loadApiKeys() {
+    try {
+      const res = await fetch('/api/auth/api-keys')
+      if (res.ok) setApiKeys(await res.json())
+    } catch {}
+  }
+
+  async function createApiKey(e) {
+    e.preventDefault()
+    if (!newKeyName.trim()) return
+    setCreatingKey(true)
+    try {
+      const res = await fetch('/api/auth/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newKeyName.trim() }),
+      })
+      if (!res.ok) { alert('Failed to create API key'); return }
+      const data = await res.json()
+      setNewlyCreatedKey(data)
+      setKeyCopied(false)
+      setNewKeyName('')
+      await loadApiKeys()
+    } catch {
+      alert('Failed to create API key')
+    } finally {
+      setCreatingKey(false)
+    }
+  }
+
+  async function revokeApiKey(keyId, keyName) {
+    if (!confirm(`Revoke API key "${keyName}"? This cannot be undone.`)) return
+    const res = await fetch(`/api/auth/api-keys/${keyId}`, { method: 'DELETE' })
+    if (!res.ok) { alert('Failed to revoke API key'); return }
+    if (newlyCreatedKey?.key_id === keyId) setNewlyCreatedKey(null)
+    await loadApiKeys()
+  }
+
+  function copyKey() {
+    if (!newlyCreatedKey) return
+    navigator.clipboard.writeText(newlyCreatedKey.key).then(() => {
+      setKeyCopied(true)
+      setTimeout(() => setKeyCopied(false), 2000)
+    }).catch(() => {})
   }
 
   async function changePassword(e) {
@@ -395,6 +449,61 @@ export default function SkillsModal({ onClose }) {
                 ℹ️ Approval is also enforced globally by your administrator.
               </div>
             )}
+          </div>
+
+          {/* API Keys */}
+          <div className="settings-section">
+            <div className="settings-field-title" style={{ marginBottom: '6px' }}>API Keys</div>
+            {newlyCreatedKey && (
+              <div className="apikey-reveal">
+                <div className="settings-help" style={{ marginBottom: '4px', color: 'var(--text-muted)' }}>
+                  ⚠ Copy your key now — it will not be shown again.
+                </div>
+                <div className="apikey-reveal-row">
+                  <code className="apikey-value">{newlyCreatedKey.key}</code>
+                  <button className="btn-sm btn-secondary" onClick={copyKey}>
+                    {keyCopied ? '✓ Copied' : 'Copy'}
+                  </button>
+                </div>
+                <div style={{ marginTop: '4px' }}>
+                  <button className="btn-sm btn-secondary" onClick={() => setNewlyCreatedKey(null)}>Dismiss</button>
+                </div>
+              </div>
+            )}
+            {apiKeys.length > 0 ? (
+              <div>
+                {apiKeys.map(k => (
+                  <div key={k.key_id} className="skill-card">
+                    <div className="skill-info">
+                      <div className="skill-name" style={{ fontSize: '0.8rem' }}>{k.name}</div>
+                      <div className="skill-desc">
+                        {k.key_prefix}…
+                        {' · '}
+                        {new Date(k.created_at).toLocaleDateString()}
+                        {k.last_used_at && ` · last used ${new Date(k.last_used_at).toLocaleDateString()}`}
+                      </div>
+                    </div>
+                    <div className="skill-actions">
+                      <button className="btn-sm btn-danger" onClick={() => revokeApiKey(k.key_id, k.name)}>Revoke</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              !newlyCreatedKey && <div className="settings-help">No API keys yet.</div>
+            )}
+            <form onSubmit={createApiKey} style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+              <input
+                type="text"
+                placeholder="Key name (e.g. my-script)"
+                value={newKeyName}
+                onChange={e => setNewKeyName(e.target.value)}
+                style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', padding: '0.4rem 0.6rem', fontFamily: 'inherit', fontSize: '0.75rem' }}
+              />
+              <button type="submit" className="btn-sm btn-secondary" disabled={creatingKey || !newKeyName.trim()}>
+                {creatingKey ? 'Creating…' : '+ New key'}
+              </button>
+            </form>
           </div>
 
           {/* Change password */}

@@ -655,6 +655,34 @@ span.toggle-enabled.readonly.on { color: var(--text-muted); border-color: var(--
 .modal-skills-footer { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.2rem; }
 .modal-skills-footer .modal-add-btn { flex: 1; margin-top: 0; }
 
+/* API key reveal box */
+.apikey-reveal {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  background: var(--bg-subtle);
+}
+.apikey-reveal-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.apikey-value {
+  flex: 1;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  word-break: break-all;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  color: var(--text);
+  user-select: all;
+}
+
 .remote-badge {
   display: inline-block;
   margin-left: 0.4rem;
