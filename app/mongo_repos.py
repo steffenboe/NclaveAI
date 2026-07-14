@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from pymongo.database import Database
 
-from app.models import RunContext, ScheduledTask, Team, User
+from app.models import ApiKey, RunContext, ScheduledTask, Team, User
 from app.runs import _run_matches
 from app.settings_store import AppSettings
 from app.skills import Skill
@@ -375,3 +375,54 @@ class MongoTeamRepository:
             raise KeyError(f"Team {team_id!r} not found")
         return self._from_doc(result)
 
+
+
+class MongoApiKeyRepository:
+    """MongoDB-backed API key repository. Same interface as ApiKeyRepository."""
+
+    def __init__(self, db: Database) -> None:
+        self._col = db["api_keys"]
+        self._col.create_index("hashed_key", unique=True, sparse=True)
+
+    def _to_doc(self, key: ApiKey) -> dict:
+        doc = key.model_dump(mode="json")
+        doc["_id"] = key.key_id
+        return doc
+
+    def _from_doc(self, doc: dict) -> ApiKey:
+        d = dict(doc)
+        d.pop("_id", None)
+        return ApiKey.model_validate(d)
+
+    def create(self, user_id: str, name: str, hashed_key: str, key_prefix: str) -> ApiKey:
+        key = ApiKey(
+            key_id=str(uuid.uuid4()),
+            user_id=user_id,
+            name=name,
+            key_prefix=key_prefix,
+            hashed_key=hashed_key,
+            created_at=datetime.now(timezone.utc),
+        )
+        self._col.insert_one(self._to_doc(key))
+        return key
+
+    def list_by_user(self, user_id: str) -> list[ApiKey]:
+        return [self._from_doc(d) for d in self._col.find({"user_id": user_id})]
+
+    def get_by_hash(self, hashed_key: str) -> ApiKey | None:
+        doc = self._col.find_one({"hashed_key": hashed_key})
+        return self._from_doc(doc) if doc else None
+
+    def touch(self, key_id: str) -> None:
+        self._col.update_one(
+            {"_id": key_id},
+            {"$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}},
+        )
+
+    def delete(self, key_id: str, user_id: str | None = None) -> None:
+        query: dict = {"_id": key_id}
+        if user_id is not None:
+            query["user_id"] = user_id
+        result = self._col.delete_one(query)
+        if result.deleted_count == 0:
+            raise KeyError(key_id)

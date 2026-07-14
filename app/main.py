@@ -21,10 +21,19 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
+from app.api_keys import ApiKeyRepository, generate_api_key, hash_api_key
+from app.auth import (
+    create_access_token,
+    get_current_user,
+    get_current_user_or_api_key,
+    get_user_from_api_key,
+    hash_password,
+    require_admin,
+    verify_password,
+)
 from app.config import settings
 from app.executor import CommandExecutor
-from app.models import Command, RunContext, ScheduledTask, Team, User, UserPublic
+from app.models import ApiKeyCreated, ApiKeyPublic, Command, RunContext, ScheduledTask, Team, User, UserPublic
 from app.planner import Planner
 from app.policy import PolicyEvaluator
 from app.runs import RunRepository, _match_hint, _run_matches
@@ -299,8 +308,9 @@ async def lifespan(app: FastAPI):
         run_repo = MongoRunRepository(mongo_db)
         scheduled_task_repo = MongoScheduledTaskRepository(mongo_db)
         user_repo = MongoUserRepository(mongo_db)
-        from app.mongo_repos import MongoTeamRepository
+        from app.mongo_repos import MongoApiKeyRepository, MongoTeamRepository
         team_repo: TeamRepository = MongoTeamRepository(mongo_db)
+        api_key_repo: ApiKeyRepository = MongoApiKeyRepository(mongo_db)
     else:
         skill_repo = SkillRepository(settings.skills_file)
         app_settings_repo = AppSettingsRepository(settings.settings_file)
@@ -308,6 +318,7 @@ async def lifespan(app: FastAPI):
         scheduled_task_repo = ScheduledTaskRepository(settings.scheduled_tasks_file)
         user_repo = UserRepository(settings.users_file)
         team_repo = TeamRepository(settings.teams_file)
+        api_key_repo: ApiKeyRepository = ApiKeyRepository(settings.api_keys_file)
     # --- audit repository selection ---
     if settings.mongodb_uri:
         from app.audit import MongoAuditRepository
@@ -387,6 +398,7 @@ async def lifespan(app: FastAPI):
     _scheduler_thread.start()
 
     app.state.user_repo = user_repo
+    app.state.api_key_repo = api_key_repo
     if user_repo.count() == 0 and settings.admin_password:
         user_repo.create(
             username=settings.admin_username,
@@ -1685,6 +1697,164 @@ def patch_run_skill(
         ctx.skill_overrides[skill_id] = body.enabled
     request.app.state.run_repo.save(ctx)
     return _run_skill_response(skill, ctx.skill_overrides)
+
+
+# ── API keys ─────────────────────────────────────────────────────────────────
+
+
+class ApiKeyCreateRequest(BaseModel):
+    name: str
+
+
+@app.post("/api/auth/api-keys", status_code=201, response_model=ApiKeyCreated)
+def create_api_key(
+    body: ApiKeyCreateRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> ApiKeyCreated:
+    """Create a new API key for the authenticated user.
+
+    The full key value is returned **once** in the response and cannot be
+    retrieved again — store it securely.
+    """
+    raw, key_prefix, hashed = generate_api_key()
+    api_key_repo: ApiKeyRepository = request.app.state.api_key_repo
+    stored = api_key_repo.create(
+        user_id=current_user.user_id,
+        name=body.name,
+        hashed_key=hashed,
+        key_prefix=key_prefix,
+    )
+    return ApiKeyCreated(
+        key_id=stored.key_id,
+        name=stored.name,
+        key_prefix=stored.key_prefix,
+        created_at=stored.created_at,
+        last_used_at=stored.last_used_at,
+        key=raw,
+    )
+
+
+@app.get("/api/auth/api-keys", response_model=list[ApiKeyPublic])
+def list_api_keys(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> list[ApiKeyPublic]:
+    """List all API keys belonging to the authenticated user."""
+    api_key_repo: ApiKeyRepository = request.app.state.api_key_repo
+    keys = api_key_repo.list_by_user(current_user.user_id)
+    return [
+        ApiKeyPublic(
+            key_id=k.key_id,
+            name=k.name,
+            key_prefix=k.key_prefix,
+            created_at=k.created_at,
+            last_used_at=k.last_used_at,
+        )
+        for k in keys
+    ]
+
+
+@app.delete("/api/auth/api-keys/{key_id}", status_code=204)
+def delete_api_key(
+    key_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Revoke an API key. Admins may revoke any key; users only their own."""
+    api_key_repo: ApiKeyRepository = request.app.state.api_key_repo
+    # Admins can revoke any key; regular users are restricted to their own.
+    scoped_user_id = None if current_user.role == "admin" else current_user.user_id
+    try:
+        api_key_repo.delete(key_id, scoped_user_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"API key {key_id!r} not found")
+
+
+# ── Skill check (API-key authenticated) ───────────────────────────────────────
+
+
+class SkillCheckRequest(BaseModel):
+    command: str
+
+
+class SkillCheckMatch(BaseModel):
+    skill_id: str
+    name: str
+    description: str
+    source: str
+
+
+class SkillCheckResponse(BaseModel):
+    command: str
+    argv: list[str]
+    allowed: bool
+    matches: list[SkillCheckMatch]
+    reason: str | None = None
+
+
+def _parse_command(command: str) -> list[str]:
+    """Parse a command string into argv, handling basic shell-like quoting."""
+    import shlex
+    try:
+        return shlex.split(command)
+    except ValueError:
+        # Fallback to simple whitespace split if shlex fails (e.g., unbalanced quotes)
+        return command.split()
+
+
+@app.post("/api/v1/skills/check", response_model=SkillCheckResponse)
+def check_skills(
+    body: SkillCheckRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user_or_api_key),
+) -> SkillCheckResponse:
+    """Check which skills (available to the caller) would allow the given command.
+
+    Accepts authentication via **session cookie** or **X-Api-Key** header.
+
+    The command string is parsed into argv and evaluated against each skill's
+    OPA policy. Returns the first skill whose policy allows the command.
+    """
+    skills = _skills_for_user(request, current_user)
+    argv = _parse_command(body.command)
+    
+    if not argv:
+        return SkillCheckResponse(
+            command=body.command,
+            argv=[],
+            allowed=False,
+            matches=[],
+            reason="Empty command",
+        )
+    
+    # Build a policy evaluator with the user's available skills
+    policy = PolicyEvaluator(skills=skills)
+    
+    # Create a Command object for evaluation
+    cmd = Command(argv=argv, rationale="")
+    
+    # Evaluate against all skills
+    allowed, reason, matching_skill = policy.evaluate(cmd)
+    
+    matches: list[SkillCheckMatch] = []
+    if matching_skill is not None:
+        matches.append(
+            SkillCheckMatch(
+                skill_id=matching_skill.id,
+                name=matching_skill.name,
+                description=matching_skill.description,
+                source=matching_skill.source,
+            )
+        )
+    
+    return SkillCheckResponse(
+        command=body.command,
+        argv=argv,
+        allowed=allowed,
+        matches=matches,
+        reason=reason,
+    )
 
 
 # ── Misc ──────────────────────────────────────────────────────────────────────

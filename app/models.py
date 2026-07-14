@@ -107,6 +107,28 @@ AuditEvent = CommandPolicyEvaluated | CommandApprovalDecision | CommandExecution
 
 
 
+class ApiKey(BaseModel):
+    key_id: str
+    user_id: str
+    name: str
+    key_prefix: str       # first 12 chars of the raw key — shown in listings
+    hashed_key: str       # SHA-256 hex digest of the full raw key
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+
+class ApiKeyPublic(BaseModel):
+    key_id: str
+    name: str
+    key_prefix: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+
+class ApiKeyCreated(ApiKeyPublic):
+    key: str  # Only returned once at creation time
+
+
 class RunContext(BaseModel):
     run_id: str
     prompt: str

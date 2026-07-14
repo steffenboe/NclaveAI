@@ -54,6 +54,7 @@ def client(tmp_path):
     from fastapi.testclient import TestClient
 
     import app.main as main_module
+    from app.api_keys import ApiKeyRepository
     from app.auth import hash_password
     from app.main import app
     from app.runs import RunRepository
@@ -85,6 +86,7 @@ def client(tmp_path):
         app.state.secrets_store = SecretsStore(tmp_path / "secrets.json")
         app.state.audit_repo = FileAuditRepository(tmp_path / "audit.jsonl")
         app.state.user_repo = user_repo
+        app.state.api_key_repo = ApiKeyRepository(tmp_path / "api_keys.json")
         app.state.remote_skill_repo = None
 
         yield c
