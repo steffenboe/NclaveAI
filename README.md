@@ -203,7 +203,7 @@ On Windows use `.venv\Scripts\activate` instead.
 ### Run the server
 
 ```sh
-uvicorn app.main:app --reload --port 8081c
+uvicorn app.main:app --reload --port 8081
 ```
 
 The API is now available at [http://localhost:8081](http://localhost:8081). If you are running the Vite dev server in parallel (`npm run dev` in `frontend/`), it will proxy `/api/*` requests there automatically.

@@ -88,6 +88,10 @@ def client(tmp_path):
         app.state.user_repo = user_repo
         app.state.api_key_repo = ApiKeyRepository(tmp_path / "api_keys.json")
         app.state.remote_skill_repo = None
+        
+        # Add policy test repository
+        from app.policy_test import PolicyTestRepository
+        app.state.policy_test_repo = PolicyTestRepository(tmp_path / "policy_tests.json")
 
         yield c
 

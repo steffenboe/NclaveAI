@@ -32,6 +32,8 @@ class Settings(BaseSettings):
 
     audit_file: Path = Path("./audit.jsonl")
 
+    policy_test_file: Path = Path("./policy_test.json")
+
     jwt_secret: str = "change-me-in-production"
 
     admin_username: str = "admin"
