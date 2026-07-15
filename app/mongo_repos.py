@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from pymongo.database import Database
 
-from app.models import ApiKey, RunContext, ScheduledTask, Team, User
+from app.models import ApiKey, PolicyTestCase, RunContext, ScheduledTask, Team, User
 from app.runs import _run_matches
 from app.settings_store import AppSettings
 from app.skills import Skill
@@ -426,3 +426,41 @@ class MongoApiKeyRepository:
         result = self._col.delete_one(query)
         if result.deleted_count == 0:
             raise KeyError(key_id)
+
+
+class MongoPolicyTestRepository:
+    """MongoDB-backed policy test repository. Same interface as PolicyTestRepository."""
+
+    def __init__(self, db: Database) -> None:
+        self._col = db["policy_tests"]
+
+    def _to_doc(self, test_case: PolicyTestCase) -> dict:
+        doc = test_case.model_dump(mode="json")
+        doc["_id"] = test_case.test_id
+        return doc
+
+    def _from_doc(self, doc: dict) -> PolicyTestCase:
+        d = dict(doc)
+        d.pop("_id", None)
+        return PolicyTestCase.model_validate(d)
+
+    def list_for_user(self, user_id: str) -> list[PolicyTestCase]:
+        return [
+            self._from_doc(d)
+            for d in self._col.find({"user_id": user_id}).sort("created_at", -1)
+        ]
+
+    def create(self, user_id: str, rego_policy: str, test_command: str) -> PolicyTestCase:
+        test_case = PolicyTestCase(
+            test_id=str(uuid.uuid4()),
+            user_id=user_id,
+            rego_policy=rego_policy,
+            test_command=test_command,
+            created_at=datetime.now(timezone.utc),
+        )
+        self._col.insert_one(self._to_doc(test_case))
+        return test_case
+
+    def delete(self, test_id: str, user_id: str) -> bool:
+        result = self._col.delete_one({"_id": test_id, "user_id": user_id})
+        return result.deleted_count > 0

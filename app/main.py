@@ -33,9 +33,10 @@ from app.auth import (
 )
 from app.config import settings
 from app.executor import CommandExecutor
-from app.models import ApiKeyCreated, ApiKeyPublic, Command, RunContext, ScheduledTask, Team, User, UserPublic
+from app.models import ApiKeyCreated, ApiKeyPublic, Command, PolicyTestCase, PolicyTestResult, RunContext, ScheduledTask, Team, User, UserPublic
 from app.planner import Planner
 from app.policy import PolicyEvaluator
+from app.policy_test import PolicyTestRepository, evaluate_policy_test
 from app.runs import RunRepository, _match_hint, _run_matches
 from app.scheduled_tasks import ScheduledTaskRepository
 from app.secrets_store import SecretsStore
@@ -311,6 +312,8 @@ async def lifespan(app: FastAPI):
         from app.mongo_repos import MongoApiKeyRepository, MongoTeamRepository
         team_repo: TeamRepository = MongoTeamRepository(mongo_db)
         api_key_repo: ApiKeyRepository = MongoApiKeyRepository(mongo_db)
+        from app.mongo_repos import MongoPolicyTestRepository
+        policy_test_repo: PolicyTestRepository = MongoPolicyTestRepository(mongo_db)
     else:
         skill_repo = SkillRepository(settings.skills_file)
         app_settings_repo = AppSettingsRepository(settings.settings_file)
@@ -319,6 +322,7 @@ async def lifespan(app: FastAPI):
         user_repo = UserRepository(settings.users_file)
         team_repo = TeamRepository(settings.teams_file)
         api_key_repo: ApiKeyRepository = ApiKeyRepository(settings.api_keys_file)
+        policy_test_repo: PolicyTestRepository = PolicyTestRepository(settings.policy_test_file)
     # --- audit repository selection ---
     if settings.mongodb_uri:
         from app.audit import MongoAuditRepository
@@ -399,6 +403,7 @@ async def lifespan(app: FastAPI):
 
     app.state.user_repo = user_repo
     app.state.api_key_repo = api_key_repo
+    app.state.policy_test_repo = policy_test_repo
     if user_repo.count() == 0 and settings.admin_password:
         user_repo.create(
             username=settings.admin_username,
@@ -1855,6 +1860,92 @@ def check_skills(
         matches=matches,
         reason=reason,
     )
+
+
+# ── Policy Test ───────────────────────────────────────────────────────────────
+
+
+class PolicyTestRequest(BaseModel):
+    rego_policy: str
+    test_command: str
+
+
+class PolicyTestResponse(BaseModel):
+    test_id: str
+    allowed: bool
+    explanation: dict[str, Any] | None
+    error: str | None = None
+
+
+class PolicyTestCaseResponse(BaseModel):
+    test_id: str
+    rego_policy: str
+    test_command: str
+    created_at: datetime
+
+
+@app.post("/api/admin/policy-test", response_model=PolicyTestResponse)
+def run_policy_test(
+    body: PolicyTestRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> PolicyTestResponse:
+    """Test a Rego policy against a command string."""
+    # Validate non-empty command
+    try:
+        argv = _parse_command(body.test_command)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    
+    if not argv:
+        raise HTTPException(status_code=422, detail="test_command must not be empty")
+    
+    # Evaluate the policy
+    result = evaluate_policy_test(rego_policy=body.rego_policy, command_str=body.test_command)
+    
+    # Store test case
+    test_case = request.app.state.policy_test_repo.create(
+        user_id=current_user.user_id,
+        rego_policy=body.rego_policy,
+        test_command=body.test_command,
+    )
+    
+    return PolicyTestResponse(
+        test_id=test_case.test_id,
+        allowed=result.allowed,
+        explanation=result.explanation,
+        error=result.error,
+    )
+
+
+@app.get("/api/admin/policy-test", response_model=list[PolicyTestCaseResponse])
+def list_policy_tests(
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> list[PolicyTestCaseResponse]:
+    """List all policy test cases for the current user."""
+    tests = request.app.state.policy_test_repo.list_for_user(current_user.user_id)
+    return [
+        PolicyTestCaseResponse(
+            test_id=t.test_id,
+            rego_policy=t.rego_policy,
+            test_command=t.test_command,
+            created_at=t.created_at,
+        )
+        for t in tests
+    ]
+
+
+@app.delete("/api/admin/policy-test/{test_id}", status_code=204)
+def delete_policy_test(
+    test_id: str,
+    request: Request,
+    current_user: User = Depends(require_admin),
+) -> None:
+    """Delete a policy test case."""
+    deleted = request.app.state.policy_test_repo.delete(test_id, current_user.user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Policy test {test_id!r} not found")
 
 
 # ── Misc ──────────────────────────────────────────────────────────────────────

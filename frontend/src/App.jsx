@@ -6,6 +6,7 @@ import SkillsModal from './components/SkillsModal'
 import ScheduledTasksModal from './components/ScheduledTasksModal'
 import UsersModal from './components/UsersModal'
 import TeamsModal from './components/TeamsModal'
+import PolicyTestModal from './components/PolicyTestModal'
 import { useAuth } from './AuthContext'
 import Login from './Login'
 // Shadows the global fetch in this module so all API calls get 401 interception
@@ -46,6 +47,7 @@ function MainApp({ user, logout }) {
   const [scheduledTasksModalOpen, setScheduledTasksModalOpen] = useState(false)
   const [usersModalOpen, setUsersModalOpen] = useState(false)
   const [teamsModalOpen, setTeamsModalOpen] = useState(false)
+  const [policyTestModalOpen, setPolicyTestModalOpen] = useState(false)
   const [convSkillsData, setConvSkillsData] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
@@ -335,6 +337,7 @@ function MainApp({ user, logout }) {
         onOpenScheduledTasksModal={() => setScheduledTasksModalOpen(true)}
         onOpenUsersModal={user?.role === 'admin' ? () => setUsersModalOpen(true) : null}
         onOpenTeamsModal={user?.role === 'admin' ? () => setTeamsModalOpen(true) : null}
+        onOpenPolicyTest={user?.role === 'admin' ? () => setPolicyTestModalOpen(true) : null}
       />
       <div className="main">
         <ConversationFeed
@@ -373,6 +376,9 @@ function MainApp({ user, logout }) {
       )}
       {user?.role === 'admin' && teamsModalOpen && (
         <TeamsModal onClose={() => setTeamsModalOpen(false)} />
+      )}
+      {user?.role === 'admin' && policyTestModalOpen && (
+        <PolicyTestModal onClose={() => setPolicyTestModalOpen(false)} />
       )}
     </>
   )

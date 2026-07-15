@@ -159,3 +159,19 @@ class ScheduledTask(BaseModel):
     last_run_at: datetime | None = None
     last_run_id: str | None = None
     last_error: str | None = None
+
+
+class PolicyTestCase(BaseModel):
+    """A test case for validating OPA policies."""
+    test_id: str
+    user_id: str
+    rego_policy: str
+    test_command: str
+    created_at: datetime
+
+
+class PolicyTestResult(BaseModel):
+    """Result of evaluating a policy test case."""
+    allowed: bool
+    explanation: dict[str, Any]
+    error: str | None = None
