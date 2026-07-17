@@ -160,6 +160,7 @@ def _start_run_internal(
     seeded_overrides: dict[str, bool] = {}
     parent_run_id: str | None = None
     seeded_model: str | None = llm_model
+    seeded_conv_history: list[dict] = []
     history_snapshot: list = []
     if context_run_id is not None:
         with _runs_lock:
@@ -172,6 +173,12 @@ def _start_run_internal(
                 parent_run_id = context_run_id
                 if seeded_model is None:
                     seeded_model = parent_ctx.llm_model
+                # Build conversation history: inherit parent's prior turns, then append this turn
+                inherited = list(parent_ctx.conversation_history)
+                inherited.append({"role": "user", "content": parent_ctx.prompt})
+                if parent_ctx.final_message:
+                    inherited.append({"role": "assistant", "content": parent_ctx.final_message})
+                seeded_conv_history = inherited
         if parent_run_id is not None:
             seeded_history = copy.deepcopy(history_snapshot)
             history_start_index = len(seeded_history)
@@ -185,16 +192,18 @@ def _start_run_internal(
         parent_run_id=parent_run_id,
         llm_model=seeded_model,
         owner_id=current_user.user_id,
+        conversation_history=seeded_conv_history,
     )
     skill_repo = app.state.skill_repo
     remote_skill_repo = getattr(app.state, "remote_skill_repo", None)
     run_repo = app.state.run_repo
 
+    app_settings_repo = getattr(app.state, "app_settings_repo", None)
+    app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
     if seeded_model is None:
-        app_settings_repo = getattr(app.state, "app_settings_repo", None)
-        app_settings = app_settings_repo.load() if app_settings_repo else AppSettings()
         seeded_model = app_settings.default_model or settings.llm_model
     ctx.llm_model = seeded_model
+    user_system_prompt = app_settings.system_prompt
 
     with _runs_lock:
         _runs[run_id] = ctx
@@ -212,6 +221,7 @@ def _start_run_internal(
             team_repo=getattr(app.state, "team_repo", None),
             user_id=current_user.user_id,
             team_remote_repos=getattr(app.state, "team_remote_repos", {}),
+            user_system_prompt=user_system_prompt,
         )
         with _workflows_lock:
             _workflows[run_id] = workflow
@@ -472,6 +482,7 @@ def _build_workflow(
     team_repo: TeamRepository | None = None,
     user_id: str | None = None,
     team_remote_repos: dict | None = None,
+    user_system_prompt: str | None = None,
 ) -> AgentWorkflow:
     local_skills = skill_repo.list()
     remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
@@ -516,6 +527,7 @@ def _build_workflow(
             llm_base_url=llm_base_url,
             llm_api_key=llm_api_key,
             llm_model=llm_model,
+            user_system_prompt=user_system_prompt,
         ),
         policy=PolicyEvaluator(skills=all_skills),
         executor=CommandExecutor(),
@@ -1264,6 +1276,7 @@ class SettingsResponse(BaseModel):
     skills_repo_url: str | None
     skills_repo_branch: str
     default_model: str | None
+    system_prompt: str | None
 
 
 class SettingsPatchRequest(BaseModel):
@@ -1273,6 +1286,7 @@ class SettingsPatchRequest(BaseModel):
     skills_repo_url: str | None = None
     skills_repo_branch: str | None = None
     default_model: str | None = None
+    system_prompt: str | None = None
 
 
 @app.get("/api/settings", response_model=SettingsResponse)
@@ -1291,6 +1305,7 @@ def get_settings(request: Request, current_user: User = Depends(require_admin)) 
             default_model=app_settings.default_model
             if app_settings.default_model
             else settings.llm_model,
+            system_prompt=app_settings.system_prompt,
         )
 
 
@@ -1377,6 +1392,11 @@ def put_settings(body: SettingsPatchRequest, request: Request, current_user: Use
             app_settings.default_model = trimmed_default_model
         settings_changed = True
 
+    # ── System prompt (persisted) ─────────────────────────────────────────────
+    if "system_prompt" in body.model_fields_set:
+        app_settings.system_prompt = body.system_prompt or None
+        settings_changed = True
+
     if settings_changed:
         app_settings_repo.save(app_settings)
 
@@ -1394,6 +1414,7 @@ def put_settings(body: SettingsPatchRequest, request: Request, current_user: Use
             default_model=app_settings.default_model
             if app_settings.default_model
             else settings.llm_model,
+            system_prompt=app_settings.system_prompt,
         )
 
 

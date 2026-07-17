@@ -28,6 +28,8 @@ export default function SkillsModal({ onClose }) {
   const [availableModels, setAvailableModels] = useState([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [fetchModelsError, setFetchModelsError] = useState('')
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [savingSystemPrompt, setSavingSystemPrompt] = useState(false)
   // skillForm: null = hidden, {} = new skill, { skill } = editing existing
   const [skillForm, setSkillForm] = useState(null)
   const [form, setForm] = useState({ name: '', description: '', policy: '' })
@@ -96,6 +98,8 @@ export default function SkillsModal({ onClose }) {
         setTokenHelp('No token configured yet.')
       }
       if (data.default_model) setDefaultModel(data.default_model)
+      if (typeof data.system_prompt === 'string') setSystemPrompt(data.system_prompt)
+      else setSystemPrompt('')
     } catch {}
   }
 
@@ -267,6 +271,23 @@ export default function SkillsModal({ onClose }) {
     } finally {
       setFetchingModels(false)
     }
+  }
+
+  async function saveSystemPrompt() {
+    setSavingSystemPrompt(true)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system_prompt: systemPrompt.trim() || null }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'HTTP ' + res.status)
+      }
+      await loadSettings()
+    } catch (e) { alert('Failed to save system prompt: ' + e.message) }
+    finally { setSavingSystemPrompt(false) }
   }
 
   async function saveModelSettings() {
@@ -632,6 +653,28 @@ export default function SkillsModal({ onClose }) {
             <div className="form-actions" style={{ marginTop: 0 }}>
               <button className="btn-sm btn-secondary" onClick={saveModelSettings} disabled={availableModels.length === 0}>
                 Save model settings
+              </button>
+            </div>
+          </div>
+          )}
+
+          {/* System prompt */}
+          {isAdmin && (
+          <div className="settings-section">
+            <div className="settings-field">
+              <div className="settings-field-title">System prompt</div>
+              <textarea
+                value={systemPrompt}
+                onChange={e => setSystemPrompt(e.target.value)}
+                placeholder="Custom instructions prepended to every agent conversation…"
+                rows={5}
+                style={{ width: '100%', resize: 'vertical' }}
+              />
+              <div className="settings-help">Prepended to the agent’s built-in prompt on every run.</div>
+            </div>
+            <div className="form-actions" style={{ marginTop: 0 }}>
+              <button className="btn-sm btn-secondary" onClick={saveSystemPrompt} disabled={savingSystemPrompt}>
+                {savingSystemPrompt ? 'Saving…' : 'Save system prompt'}
               </button>
             </div>
           </div>

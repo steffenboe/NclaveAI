@@ -6,8 +6,9 @@ import re
 import ssl
 
 import httpx
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
@@ -21,6 +22,7 @@ Rules:
 - Only take the minimum action required. Do not over-correct.
 - If the last action's output shows the problem is resolved, return status=done.
 - Produce the next action as a single argv list using one of the tools above.
+  argv[0] MUST be the full binary/executable name (e.g. "kubectl", "helm", "curl") — never a subcommand.
   No shell expansion, no pipes, no redirection.
 - Your rationale field is for the audit log only — be concise.
 
@@ -157,10 +159,12 @@ class Planner:
         llm_base_url: str | None = None,
         llm_api_key: str | None = None,
         llm_model: str | None = None,
+        user_system_prompt: str | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._local_skills = local_skills  # None → use skill_repo.list() at prompt time
         self._remote_skills: list = remote_skills or []
+        self._user_system_prompt: str | None = user_system_prompt
         effective_api_key = llm_api_key if llm_api_key is not None else settings.llm_api_key
         ssl_ctx = ssl.create_default_context()
         if settings.llm_ca_bundle:
@@ -175,6 +179,10 @@ class Planner:
         )
         prompt = ChatPromptTemplate.from_messages([
             ("system", "{system_prompt}"),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            ("system", "IMPORTANT: The messages above are prior conversation summaries for context only. "
+                       "You must ALWAYS respond with a JSON object as specified in the instructions. "
+                       "Never respond with natural language."),
             ("human", _HUMAN_PROMPT),
         ])
         self._chain = prompt | llm | StrOutputParser()
@@ -197,9 +205,11 @@ class Planner:
         local_enabled = [s for s in _source if s.enabled]
         remote_enabled = [s for s in getattr(self, "_remote_skills", []) if s.enabled]
         enabled = remote_enabled + local_enabled
+        user_prefix = (self._user_system_prompt.strip() + "\n\n") if getattr(self, "_user_system_prompt", None) and self._user_system_prompt.strip() else ""
         if not enabled:
             return (
-                "You are an autonomous developer companion agent.\n\n"
+                user_prefix
+                + "You are an autonomous developer companion agent.\n\n"
                 "No specific tools are pre-configured. Use whatever CLI tools you judge appropriate "
                 "(e.g. kubectl, helm, curl). Tool calls are gated by a policy at runtime — "
                 "if a command is denied you will see an error in the action history; try an alternative.\n\n"
@@ -215,18 +225,28 @@ class Planner:
 
         tools_section = "\n\n".join(_skill_block(s) for s in enabled)
         return (
-            "You are an autonomous developer companion agent.\n\n"
-            f"The following skills are pre-configured and available:\n\n{tools_section}\n\n"
-            "You may also use any standard CLI tool that is appropriate for the task "
-            "(e.g. ls, grep, curl, cat, find) — skills are helpers, not an exhaustive list. "
+            user_prefix
+            + "You are an autonomous developer companion agent.\n\n"
+            + "If the user input is a greeting, social remark, or lacks an actionable command, respond naturally and DO NOT attempt to use any tools.\n\n"
+            + f"Otherwise, the following skills are pre-configured and available:\n\n{tools_section}\n\n"
             "Tool calls are gated by a policy at runtime — "
             "if a command is denied you will see an error in the action history; try a different approach or tool.\n\n"
             + _RULES
         )
 
+    def _build_chat_history(self, ctx: RunContext) -> list:
+        messages = []
+        for msg in ctx.conversation_history:
+            if msg.get("role") == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+            elif msg.get("role") == "assistant":
+                messages.append(AIMessage(content=msg["content"]))
+        return messages
+
     def next_action(self, ctx: RunContext) -> PlannerOutput:
         invoke_kwargs = {
             "system_prompt": self._build_system_prompt(),
+            "chat_history": self._build_chat_history(ctx),
             "prompt": ctx.prompt,
             "history_str": _format_history(ctx.history),
         }

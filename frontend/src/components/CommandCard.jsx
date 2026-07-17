@@ -1,6 +1,9 @@
+import { useState } from 'react'
+
 export default function CommandCard({ action }) {
   const argv = (action.command?.argv ?? []).join(' ')
   const hasOutput = action.stdout || action.stderr
+  const [outputOpen, setOutputOpen] = useState(true)
 
   return (
     <div className="cmd-card">
@@ -26,11 +29,17 @@ export default function CommandCard({ action }) {
       )}
 
       {hasOutput && (
-        <details className="cmd-output" defaultOpen>
-          <summary className="cmd-output-toggle">output</summary>
-          {action.stdout && <pre>{action.stdout}</pre>}
-          {action.stderr && <pre className="stderr">{action.stderr}</pre>}
-        </details>
+        <div className="cmd-output">
+          <button className="cmd-output-toggle" onClick={() => setOutputOpen(v => !v)}>
+            {outputOpen ? '▾ output' : '▸ output'}
+          </button>
+          {outputOpen && (
+            <>
+              {action.stdout && <pre>{action.stdout}</pre>}
+              {action.stderr && <pre className="stderr">{action.stderr}</pre>}
+            </>
+          )}
+        </div>
       )}
     </div>
   )
