@@ -157,10 +157,12 @@ class Planner:
         llm_base_url: str | None = None,
         llm_api_key: str | None = None,
         llm_model: str | None = None,
+        system_prompt_override: str | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._local_skills = local_skills  # None → use skill_repo.list() at prompt time
         self._remote_skills: list = remote_skills or []
+        self._system_prompt_override = system_prompt_override
         effective_api_key = llm_api_key if llm_api_key is not None else settings.llm_api_key
         ssl_ctx = ssl.create_default_context()
         if settings.llm_ca_bundle:
@@ -197,9 +199,15 @@ class Planner:
         local_enabled = [s for s in _source if s.enabled]
         remote_enabled = [s for s in getattr(self, "_remote_skills", []) if s.enabled]
         enabled = remote_enabled + local_enabled
+
+        prefix = ""
+        if self._system_prompt_override:
+            prefix = self._system_prompt_override.strip() + "\n\n"
+
         if not enabled:
             return (
-                "You are an autonomous developer companion agent.\n\n"
+                prefix
+                + "You are an autonomous developer companion agent.\n\n"
                 "No specific tools are pre-configured. Use whatever CLI tools you judge appropriate "
                 "(e.g. kubectl, helm, curl). Tool calls are gated by a policy at runtime — "
                 "if a command is denied you will see an error in the action history; try an alternative.\n\n"
@@ -215,7 +223,8 @@ class Planner:
 
         tools_section = "\n\n".join(_skill_block(s) for s in enabled)
         return (
-            "You are an autonomous developer companion agent.\n\n"
+            prefix
+            + "You are an autonomous developer companion agent.\n\n"
             f"The following skills are pre-configured and available:\n\n{tools_section}\n\n"
             "You may also use any standard CLI tool that is appropriate for the task "
             "(e.g. ls, grep, curl, cat, find) — skills are helpers, not an exhaustive list. "

@@ -15,6 +15,7 @@ class AppSettings(BaseModel):
     default_model: str | None = None
     llm_base_url: str | None = None
     llm_api_key: str | None = None
+    system_prompt: str | None = None
 
 
 class AppSettingsRepository:

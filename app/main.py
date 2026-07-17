@@ -212,6 +212,7 @@ def _start_run_internal(
             team_repo=getattr(app.state, "team_repo", None),
             user_id=current_user.user_id,
             team_remote_repos=getattr(app.state, "team_remote_repos", {}),
+            system_prompt_override=app_settings.system_prompt,
         )
         with _workflows_lock:
             _workflows[run_id] = workflow
@@ -472,6 +473,7 @@ def _build_workflow(
     team_repo: TeamRepository | None = None,
     user_id: str | None = None,
     team_remote_repos: dict | None = None,
+    system_prompt_override: str | None = None,
 ) -> AgentWorkflow:
     local_skills = skill_repo.list()
     remote_skills = remote_skill_repo.list_skills() if remote_skill_repo else []
@@ -516,6 +518,7 @@ def _build_workflow(
             llm_base_url=llm_base_url,
             llm_api_key=llm_api_key,
             llm_model=llm_model,
+            system_prompt_override=system_prompt_override,
         ),
         policy=PolicyEvaluator(skills=all_skills),
         executor=CommandExecutor(),
@@ -1264,6 +1267,7 @@ class SettingsResponse(BaseModel):
     skills_repo_url: str | None
     skills_repo_branch: str
     default_model: str | None
+    system_prompt: str | None = None
 
 
 class SettingsPatchRequest(BaseModel):
@@ -1273,6 +1277,7 @@ class SettingsPatchRequest(BaseModel):
     skills_repo_url: str | None = None
     skills_repo_branch: str | None = None
     default_model: str | None = None
+    system_prompt: str | None = None
 
 
 @app.get("/api/settings", response_model=SettingsResponse)
@@ -1291,6 +1296,7 @@ def get_settings(request: Request, current_user: User = Depends(require_admin)) 
             default_model=app_settings.default_model
             if app_settings.default_model
             else settings.llm_model,
+            system_prompt=app_settings.system_prompt,
         )
 
 
@@ -1377,6 +1383,11 @@ def put_settings(body: SettingsPatchRequest, request: Request, current_user: Use
             app_settings.default_model = trimmed_default_model
         settings_changed = True
 
+    # ── System prompt (persisted) ──────────────────────────────────────────────
+    if "system_prompt" in body.model_fields_set:
+        app_settings.system_prompt = body.system_prompt.strip() if body.system_prompt else None
+        settings_changed = True
+
     if settings_changed:
         app_settings_repo.save(app_settings)
 
@@ -1394,6 +1405,7 @@ def put_settings(body: SettingsPatchRequest, request: Request, current_user: Use
             default_model=app_settings.default_model
             if app_settings.default_model
             else settings.llm_model,
+            system_prompt=app_settings.system_prompt,
         )
 
 
