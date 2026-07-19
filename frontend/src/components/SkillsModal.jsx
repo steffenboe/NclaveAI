@@ -17,6 +17,18 @@ export default function SkillsModal({ onClose }) {
   const [llmToken, setLlmToken] = useState('')
   const [tokenMasked, setTokenMasked] = useState(false)
   const [tokenHelp, setTokenHelp] = useState('')
+  const [sttEndpoint, setSttEndpoint] = useState('')
+  const [sttToken, setSttToken] = useState('')
+  const [sttTokenMasked, setSttTokenMasked] = useState(false)
+  const [sttTokenHelp, setSttTokenHelp] = useState('')
+  const [sttModel, setSttModel] = useState('whisper-1')
+  const [ttsEndpoint, setTtsEndpoint] = useState('')
+  const [ttsToken, setTtsToken] = useState('')
+  const [ttsTokenMasked, setTtsTokenMasked] = useState(false)
+  const [ttsTokenHelp, setTtsTokenHelp] = useState('')
+  const [ttsModel, setTtsModel] = useState('tts-1')
+  const [ttsVoice, setTtsVoice] = useState('alloy')
+  const [savingVoiceSettings, setSavingVoiceSettings] = useState(false)
   const [repoUrl, setRepoUrl] = useState('')
   const [repoBranch, setRepoBranch] = useState('main')
   const [savingRepo, setSavingRepo] = useState(false)
@@ -100,6 +112,36 @@ export default function SkillsModal({ onClose }) {
       if (data.default_model) setDefaultModel(data.default_model)
       if (typeof data.system_prompt === 'string') setSystemPrompt(data.system_prompt)
       else setSystemPrompt('')
+    } catch {}
+    
+    // Load voice settings
+    try {
+      const res = await fetch('/api/live/config')
+      if (!res.ok) return
+      const data = await res.json()
+      if (typeof data.stt_base_url === 'string') setSttEndpoint(data.stt_base_url)
+      if (typeof data.stt_model === 'string') setSttModel(data.stt_model)
+      if (data.has_stt_api_key) {
+        setSttToken(MASKED_TOKEN_VALUE)
+        setSttTokenMasked(true)
+        setSttTokenHelp('A token is currently configured and masked. Type a new one to replace it.')
+      } else {
+        setSttToken('')
+        setSttTokenMasked(false)
+        setSttTokenHelp('No token configured yet.')
+      }
+      if (typeof data.tts_base_url === 'string') setTtsEndpoint(data.tts_base_url)
+      if (typeof data.tts_model === 'string') setTtsModel(data.tts_model)
+      if (typeof data.tts_voice === 'string') setTtsVoice(data.tts_voice)
+      if (data.has_tts_api_key) {
+        setTtsToken(MASKED_TOKEN_VALUE)
+        setTtsTokenMasked(true)
+        setTtsTokenHelp('A token is currently configured and masked. Type a new one to replace it.')
+      } else {
+        setTtsToken('')
+        setTtsTokenMasked(false)
+        setTtsTokenHelp('No token configured yet.')
+      }
     } catch {}
   }
 
@@ -227,6 +269,40 @@ export default function SkillsModal({ onClose }) {
       await fetchModelsFromApi()
       alert('LLM settings saved.')
     } catch (e) { alert('Failed to save LLM settings: ' + e.message) }
+  }
+
+  async function saveVoiceSettings() {
+    setSavingVoiceSettings(true)
+    try {
+      const payload = {}
+      
+      // STT settings
+      if (sttEndpoint.trim()) payload.stt_base_url = sttEndpoint.trim()
+      if (!sttTokenMasked && sttToken.trim()) payload.stt_api_key = sttToken.trim()
+      if (sttModel.trim()) payload.stt_model = sttModel.trim()
+      
+      // TTS settings
+      if (ttsEndpoint.trim()) payload.tts_base_url = ttsEndpoint.trim()
+      if (!ttsTokenMasked && ttsToken.trim()) payload.tts_api_key = ttsToken.trim()
+      if (ttsModel.trim()) payload.tts_model = ttsModel.trim()
+      if (ttsVoice.trim()) payload.tts_voice = ttsVoice.trim()
+      
+      const res = await fetch('/api/live/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'HTTP ' + res.status)
+      }
+      await loadSettings()
+      alert('Voice settings saved.')
+    } catch (e) { 
+      alert('Failed to save voice settings: ' + e.message) 
+    } finally {
+      setSavingVoiceSettings(false)
+    }
   }
 
   async function saveRepoSettings() {
@@ -584,6 +660,108 @@ export default function SkillsModal({ onClose }) {
             </div>
             <div className="form-actions" style={{ marginTop: 0 }}>
               <button className="btn-sm btn-secondary" onClick={saveLlmSettings}>Save LLM settings</button>
+            </div>
+          </div>
+          )}
+
+          {/* Voice Settings (STT/TTS) */}
+          {isAdmin && (
+          <div className="settings-section">
+            <div className="settings-field-title" style={{ marginBottom: '8px', fontSize: '0.85rem', fontWeight: 600 }}>
+              Voice Settings (Live Mode)
+            </div>
+            
+            <div className="settings-field">
+              <div className="settings-field-title">Speech-to-Text endpoint</div>
+              <input
+                type="text"
+                value={sttEndpoint}
+                onChange={e => setSttEndpoint(e.target.value)}
+                placeholder="https://api.openai.com"
+              />
+            </div>
+            <div className="settings-field">
+              <div className="settings-field-title">STT API token</div>
+              <input
+                type="password"
+                value={sttToken}
+                onChange={e => {
+                  setSttToken(e.target.value)
+                  if (e.target.value !== MASKED_TOKEN_VALUE) setSttTokenMasked(false)
+                }}
+                onFocus={() => {
+                  if (sttTokenMasked) { setSttToken(''); setSttTokenMasked(false) }
+                }}
+                placeholder="Leave empty to keep current token"
+              />
+              <div className="settings-help">{sttTokenHelp}</div>
+            </div>
+            <div className="settings-field">
+              <div className="settings-field-title">STT model</div>
+              <input
+                type="text"
+                value={sttModel}
+                onChange={e => setSttModel(e.target.value)}
+                placeholder="whisper-1"
+              />
+            </div>
+            
+            <div style={{ marginTop: '12px', marginBottom: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+            </div>
+            
+            <div className="settings-field">
+              <div className="settings-field-title">Text-to-Speech endpoint</div>
+              <input
+                type="text"
+                value={ttsEndpoint}
+                onChange={e => setTtsEndpoint(e.target.value)}
+                placeholder="https://api.openai.com"
+              />
+            </div>
+            <div className="settings-field">
+              <div className="settings-field-title">TTS API token</div>
+              <input
+                type="password"
+                value={ttsToken}
+                onChange={e => {
+                  setTtsToken(e.target.value)
+                  if (e.target.value !== MASKED_TOKEN_VALUE) setTtsTokenMasked(false)
+                }}
+                onFocus={() => {
+                  if (ttsTokenMasked) { setTtsToken(''); setTtsTokenMasked(false) }
+                }}
+                placeholder="Leave empty to keep current token"
+              />
+              <div className="settings-help">{ttsTokenHelp}</div>
+            </div>
+            <div className="settings-field">
+              <div className="settings-field-title">TTS model</div>
+              <input
+                type="text"
+                value={ttsModel}
+                onChange={e => setTtsModel(e.target.value)}
+                placeholder="tts-1"
+              />
+            </div>
+            <div className="settings-field">
+              <div className="settings-field-title">TTS voice</div>
+              <select
+                value={ttsVoice}
+                onChange={e => setTtsVoice(e.target.value)}
+              >
+                <option value="alloy">Alloy</option>
+                <option value="echo">Echo</option>
+                <option value="fable">Fable</option>
+                <option value="onyx">Onyx</option>
+                <option value="nova">Nova</option>
+                <option value="shimmer">Shimmer</option>
+              </select>
+            </div>
+            
+            <div className="form-actions" style={{ marginTop: 0 }}>
+              <button className="btn-sm btn-secondary" onClick={saveVoiceSettings} disabled={savingVoiceSettings}>
+                {savingVoiceSettings ? 'Saving…' : 'Save voice settings'}
+              </button>
             </div>
           </div>
           )}

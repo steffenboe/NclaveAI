@@ -1969,6 +1969,188 @@ def delete_policy_test(
         raise HTTPException(status_code=404, detail=f"Policy test {test_id!r} not found")
 
 
+# ── Live Mode (Voice Chat) ────────────────────────────────────────────────────
+
+
+class LiveModeConfig(BaseModel):
+    stt_base_url: str | None = None
+    stt_api_key: str | None = None
+    stt_model: str | None = None
+    tts_base_url: str | None = None
+    tts_api_key: str | None = None
+    tts_model: str | None = None
+    tts_voice: str | None = None
+
+
+class LiveModeConfigResponse(BaseModel):
+    stt_base_url: str
+    has_stt_api_key: bool
+    stt_model: str
+    tts_base_url: str
+    has_tts_api_key: bool
+    tts_model: str
+    tts_voice: str
+
+
+@app.get("/api/live/config", response_model=LiveModeConfigResponse)
+def get_live_config(current_user: User = Depends(get_current_user)) -> LiveModeConfigResponse:
+    """Get STT/TTS configuration for live mode."""
+    return LiveModeConfigResponse(
+        stt_base_url=settings.stt_base_url,
+        has_stt_api_key=bool(settings.stt_api_key),
+        stt_model=settings.stt_model,
+        tts_base_url=settings.tts_base_url,
+        has_tts_api_key=bool(settings.tts_api_key),
+        tts_model=settings.tts_model,
+        tts_voice=settings.tts_voice,
+    )
+
+
+@app.put("/api/live/config", response_model=LiveModeConfigResponse)
+def update_live_config(
+    body: LiveModeConfig,
+    current_user: User = Depends(require_admin),
+) -> LiveModeConfigResponse:
+    """Update STT/TTS configuration for live mode (admin only)."""
+    global settings
+    
+    # Update settings (in production, these should be persisted)
+    if body.stt_base_url is not None:
+        settings.stt_base_url = body.stt_base_url
+    if body.stt_api_key is not None:
+        settings.stt_api_key = body.stt_api_key
+    if body.stt_model is not None:
+        settings.stt_model = body.stt_model
+    if body.tts_base_url is not None:
+        settings.tts_base_url = body.tts_base_url
+    if body.tts_api_key is not None:
+        settings.tts_api_key = body.tts_api_key
+    if body.tts_model is not None:
+        settings.tts_model = body.tts_model
+    if body.tts_voice is not None:
+        settings.tts_voice = body.tts_voice
+    
+    return LiveModeConfigResponse(
+        stt_base_url=settings.stt_base_url,
+        has_stt_api_key=bool(settings.stt_api_key),
+        stt_model=settings.stt_model,
+        tts_base_url=settings.tts_base_url,
+        has_tts_api_key=bool(settings.tts_api_key),
+        tts_model=settings.tts_model,
+        tts_voice=settings.tts_voice,
+    )
+
+
+@app.post("/api/live/transcribe")
+async def transcribe_audio(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Transcribe audio using STT provider (OpenAI-compatible API)."""
+    import httpx
+    
+    # Read audio data from request
+    audio_data = await request.body()
+    
+    if not audio_data:
+        raise HTTPException(status_code=400, detail="No audio data provided")
+    
+    # Prepare multipart form data for OpenAI-compatible API
+    files = {
+        'file': ('audio.webm', audio_data, 'audio/webm'),
+    }
+    data = {
+        'model': settings.stt_model,
+    }
+    
+    headers = {}
+    if settings.stt_api_key:
+        headers['Authorization'] = f'Bearer {settings.stt_api_key}'
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.post(
+                f"{settings.stt_base_url}/v1/audio/transcriptions",
+                files=files,
+                data=data,
+                headers=headers,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"STT API error: {e.response.status_code} - {e.response.text}")
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"STT API error: {e.response.text}"
+            )
+        except Exception as e:
+            logger.error(f"STT request failed: {e}")
+            raise HTTPException(status_code=503, detail=f"STT service unavailable: {str(e)}")
+
+
+from fastapi.responses import StreamingResponse
+import io
+
+
+@app.post("/api/live/synthesize")
+async def synthesize_speech(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Synthesize speech using TTS provider (OpenAI-compatible API) with streaming."""
+    import httpx
+    
+    # Read request body
+    body = await request.json()
+    text = body.get('text', '')
+    
+    if not text:
+        raise HTTPException(status_code=400, detail="No text provided")
+    
+    # Prepare request for OpenAI-compatible TTS API
+    payload = {
+        'model': settings.tts_model,
+        'input': text,
+        'voice': settings.tts_voice,
+        'response_format': 'mp3',
+    }
+    
+    headers = {'Content-Type': 'application/json'}
+    if settings.tts_api_key:
+        headers['Authorization'] = f'Bearer {settings.tts_api_key}'
+    
+    async def generate_audio():
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                async with client.stream(
+                    'POST',
+                    f"{settings.tts_base_url}/v1/audio/speech",
+                    json=payload,
+                    headers=headers,
+                ) as response:
+                    response.raise_for_status()
+                    async for chunk in response.aiter_bytes(chunk_size=4096):
+                        yield chunk
+            except httpx.HTTPStatusError as e:
+                logger.error(f"TTS API error: {e.response.status_code}")
+                raise HTTPException(
+                    status_code=e.response.status_code,
+                    detail=f"TTS API error"
+                )
+            except Exception as e:
+                logger.error(f"TTS request failed: {e}")
+                raise HTTPException(status_code=503, detail=f"TTS service unavailable: {str(e)}")
+    
+    return StreamingResponse(
+        generate_audio(),
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-cache",
+            "Transfer-Encoding": "chunked",
+        }
+    )
+
+
 # ── Misc ──────────────────────────────────────────────────────────────────────
 
 

@@ -10,6 +10,20 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1"
 
+    # Speech-to-Text and Text-to-Speech providers (OpenAI-compatible)
+    stt_base_url: str = "https://api.openai.com"
+    stt_api_key: str = ""
+    stt_model: str = "whisper-1"
+
+    tts_base_url: str = "https://api.openai.com"
+    tts_api_key: str = ""
+    tts_model: str = "tts-1"
+    tts_voice: str = "alloy"
+
+    # SSL/TLS Configuration
+    ssl_keyfile: str | None = None
+    ssl_certfile: str | None = None
+
     max_iterations: int = 10
 
     command_timeout_seconds: int = 30

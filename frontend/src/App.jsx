@@ -7,6 +7,7 @@ import ScheduledTasksModal from './components/ScheduledTasksModal'
 import UsersModal from './components/UsersModal'
 import TeamsModal from './components/TeamsModal'
 import PolicyTestModal from './components/PolicyTestModal'
+import LiveMode from './components/LiveMode'
 import { useAuth } from './AuthContext'
 import Login from './Login'
 // Shadows the global fetch in this module so all API calls get 401 interception
@@ -51,6 +52,8 @@ function MainApp({ user, logout }) {
   const [convSkillsData, setConvSkillsData] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
+  const [liveModeEnabled, setLiveModeEnabled] = useState(false)
+  const [currentResponse, setCurrentResponse] = useState('')
 
   const pendingOverridesRef = useRef({})
   const pollingRef = useRef(new Set())
@@ -267,6 +270,9 @@ function MainApp({ user, logout }) {
     await applyPendingOverrides(data.run_id)
     pollRun(data.run_id)
     loadConvSkills(data.run_id)
+    
+    // For live mode, we'll capture the response when the run completes
+    // This is handled by the pollRun function which updates the run state
   }, [selectedRootId, upsertRun, applyPendingOverrides, pollRun, loadConvSkills])
 
   const toggleConvSkill = useCallback(async (tailRunId, skill) => {
@@ -340,19 +346,36 @@ function MainApp({ user, logout }) {
         onOpenPolicyTest={user?.role === 'admin' ? () => setPolicyTestModalOpen(true) : null}
       />
       <div className="main">
-        <ConversationFeed
-          runs={runs}
-          chain={chain}
-          tailRun={tailRun}
-          onApprove={handleApprove}
-          onDeny={handleDeny}
-          onSubmit={submitRun}
-        />
-        <ConvSkillsBar
-          tailRunId={tailRunId}
-          convSkillsData={convSkillsData}
-          onToggleSkill={toggleConvSkill}
-        />
+        {liveModeEnabled ? (
+          <LiveMode
+            onSubmit={submitRun}
+            isProcessing={tailRun?.status === 'running'}
+            currentResponse={currentResponse}
+          />
+        ) : (
+          <>
+            <ConversationFeed
+              runs={runs}
+              chain={chain}
+              tailRun={tailRun}
+              onApprove={handleApprove}
+              onDeny={handleDeny}
+              onSubmit={submitRun}
+            />
+            <ConvSkillsBar
+              tailRunId={tailRunId}
+              convSkillsData={convSkillsData}
+              onToggleSkill={toggleConvSkill}
+            />
+          </>
+        )}
+        <button
+          className="live-mode-toggle"
+          onClick={() => setLiveModeEnabled(!liveModeEnabled)}
+          title={liveModeEnabled ? 'Switch to text mode' : 'Switch to voice mode'}
+        >
+          {liveModeEnabled ? '💬' : '🎤'}
+        </button>
       </div>
       {skillsModalOpen && (
         <SkillsModal onClose={() => {
@@ -379,6 +402,19 @@ function MainApp({ user, logout }) {
       )}
       {user?.role === 'admin' && policyTestModalOpen && (
         <PolicyTestModal onClose={() => setPolicyTestModalOpen(false)} />
+      )}
+      {user?.role === 'admin' && (
+        <LiveMode />
+      )}
+      {liveModeEnabled && (
+        <div className="live-mode-indicator">
+          Live Mode is enabled
+        </div>
+      )}
+      {!liveModeEnabled && (
+        <button className="toggle-live-mode" onClick={() => setLiveModeEnabled(true)}>
+          Enable Live Mode
+        </button>
       )}
     </>
   )

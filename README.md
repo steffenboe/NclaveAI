@@ -359,8 +359,69 @@ Deleting a run **does not** remove its audit events. This ensures a complete, ta
 | `RUNS_FILE` | no | `./runs.json` | Path to run history |
 | `SECRETS_FILE` | no | `./secrets.json` | Path to secrets store |
 | `AUDIT_FILE` | no | `./audit.jsonl` | Path to audit log (file backend) |
+| `STT_BASE_URL` | no | `https://api.openai.com` | Speech-to-text provider base URL |
+| `STT_API_KEY` | no | — | Speech-to-text API key |
+| `STT_MODEL` | no | `whisper-1` | Speech-to-text model name |
+| `TTS_BASE_URL` | no | `https://api.openai.com` | Text-to-speech provider base URL |
+| `TTS_API_KEY` | no | — | Text-to-speech API key |
+| `TTS_MODEL` | no | `tts-1` | Text-to-speech model name |
+| `TTS_VOICE` | no | `alloy` | Text-to-speech voice |
 
 The remote skill repository is configured via the UI (Settings modal → Remote skill repository), not via environment variables.
+
+---
+
+## Live Mode (Voice Chat)
+
+NclaveAI includes a **Live Mode** feature that enables hands-free voice conversations with the agent using OpenAI-compatible speech-to-text (STT) and text-to-speech (TTS) providers.
+
+### Features
+
+- **Real-time voice input**: Speak naturally to interact with the agent
+- **Streaming TTS**: Near real-time audio playback of agent responses
+- **Automatic conversation flow**: The system automatically listens, processes, and responds
+- **Browser-based**: Uses Web Speech API for speech recognition
+
+### Configuration
+
+Configure your STT/TTS providers via environment variables:
+
+```bash
+# Speech-to-Text (OpenAI Whisper or compatible)
+STT_BASE_URL=https://api.openai.com
+STT_API_KEY=your-stt-api-key
+STT_MODEL=whisper-1
+
+# Text-to-Speech (OpenAI TTS or compatible)
+TTS_BASE_URL=https://api.openai.com
+TTS_API_KEY=your-tts-api-key
+TTS_MODEL=tts-1
+TTS_VOICE=alloy  # Options: alloy, echo, fable, onyx, nova, shimmer
+```
+
+### Using Live Mode
+
+1. Click the **microphone button** (🎤) in the bottom-right corner of the UI to switch to voice mode
+2. Click the large **"Start Voice Chat"** button to begin listening
+3. Speak your request naturally - the system will automatically transcribe and submit it
+4. The agent will process your request and speak the response
+5. After the response completes, listening automatically resumes for the next turn
+
+### Compatible Providers
+
+Live Mode works with any OpenAI-compatible STT/TTS API:
+
+- **OpenAI**: Native Whisper and TTS APIs
+- **Azure OpenAI**: Speech services
+- **Local providers**: Ollama with Whisper models, local TTS servers
+- **Third-party APIs**: Any service implementing the OpenAI audio API format
+
+### Technical Details
+
+- **Speech Recognition**: Uses browser's Web Speech API (Chrome/Edge recommended)
+- **Audio Streaming**: TTS responses are streamed in chunks for low-latency playback
+- **Audio Format**: MP3 format for TTS, WebM for STT (browser-dependent)
+- **Auto-resume**: Listening automatically resumes after the agent finishes speaking
 
 ---
 
