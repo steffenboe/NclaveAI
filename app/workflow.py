@@ -58,7 +58,7 @@ class AgentWorkflow:
         if ctx is None:
             if run_id is None:
                 raise ValueError("run_id required when ctx is not provided")
-            ctx = RunContext(run_id=run_id, prompt=prompt)
+            ctx = RunContext(run_id=run_id, prompt=prompt, created_at=datetime.now(timezone.utc))
         self._log("run_started", ctx, extra={"prompt": prompt})
 
         for iteration in range(max_iterations):
