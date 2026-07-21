@@ -145,6 +145,7 @@ class RunContext(BaseModel):
     owner_id: str | None = None
     last_actor_id: str | None = None   # transient; not persisted (cleared after each command)
     conversation_history: list[dict] = []  # prior turns: [{"role": "user"|"assistant", "content": str}]
+    created_at: datetime | None = None  # timestamp when run was created
 
 
 class ScheduledTask(BaseModel):

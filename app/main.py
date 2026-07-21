@@ -193,6 +193,7 @@ def _start_run_internal(
         llm_model=seeded_model,
         owner_id=current_user.user_id,
         conversation_history=seeded_conv_history,
+        created_at=datetime.now(timezone.utc),
     )
     skill_repo = app.state.skill_repo
     remote_skill_repo = getattr(app.state, "remote_skill_repo", None)

@@ -17,6 +17,54 @@ function StatusBadge({ status }) {
   }
 }
 
+// Helper function to determine date group
+function getDateGroup(createdAt) {
+  if (!createdAt) return 'Older'
+  
+  const now = new Date()
+  const chatDate = new Date(createdAt)
+  const diffTime = now - chatDate
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+  
+  // Check if it's today (same calendar day)
+  if (now.toDateString() === chatDate.toDateString()) {
+    return 'Today'
+  }
+  
+  // Check if it's yesterday
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (yesterday.toDateString() === chatDate.toDateString()) {
+    return 'Yesterday'
+  }
+  
+  if (diffDays < 7) return 'This Week'
+  if (diffDays < 30) return 'This Month'
+  return 'Older'
+}
+
+// Group chats by date
+function groupChatsByDate(chats, runs) {
+  const groups = {}
+  const groupOrder = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older']
+  
+  chats.forEach(chat => {
+    const run = runs[chat.runId]
+    const createdAt = run?.created_at
+    const group = getDateGroup(createdAt)
+    
+    if (!groups[group]) {
+      groups[group] = []
+    }
+    groups[group].push(chat)
+  })
+  
+  // Return groups in the specified order
+  return groupOrder
+    .filter(groupName => groups[groupName] && groups[groupName].length > 0)
+    .map(groupName => ({ name: groupName, chats: groups[groupName] }))
+}
+
 export default function Sidebar({
   runs, runOrder, selectedRootId,
   onNewChat, onSelectConversation, onDeleteConversation, onOpenSettings,
@@ -25,6 +73,13 @@ export default function Sidebar({
 }) {
   const roots = getRoots(runs, runOrder).slice().reverse()
   const isSearching = searchQuery.trim().length > 0
+
+  // Group roots by date for display
+  const rootsWithRuns = roots.map(rootId => ({
+    runId: rootId,
+    run: runs[rootId]
+  }))
+  const groupedChats = !isSearching ? groupChatsByDate(rootsWithRuns, runs) : []
 
   return (
     <div className="sidebar">
@@ -67,32 +122,37 @@ export default function Sidebar({
             ? <div style={{ color: '#484f58', fontSize: '11px', fontStyle: 'italic', padding: '8px 4px' }}>
                 No conversations yet.
               </div>
-            : roots.map(rootId => {
-                const run = runs[rootId]
-                const status = getChainTailStatus(runs, runOrder, rootId)
-                return (
-                  <div
-                    key={rootId}
-                    className={'sidebar-item' + (rootId === selectedRootId ? ' active' : '')}
-                    onClick={() => onSelectConversation(rootId)}
-                  >
-                    <div className="sidebar-main">
-                      <div className="sidebar-prompt">{run.prompt}</div>
-                      <div className="sidebar-status">
-                        <StatusBadge status={status} />
+            : groupedChats.map(group => (
+                <div key={group.name} className="chat-group">
+                  <div className="chat-group-header">{group.name}</div>
+                  {group.chats.map(({ runId }) => {
+                    const run = runs[runId]
+                    const status = getChainTailStatus(runs, runOrder, runId)
+                    return (
+                      <div
+                        key={runId}
+                        className={'sidebar-item' + (runId === selectedRootId ? ' active' : '')}
+                        onClick={() => onSelectConversation(runId)}
+                      >
+                        <div className="sidebar-main">
+                          <div className="sidebar-prompt">{run.prompt}</div>
+                          <div className="sidebar-status">
+                            <StatusBadge status={status} />
+                          </div>
+                        </div>
+                        <button
+                          className="sidebar-delete"
+                          title="Delete conversation"
+                          aria-label="Delete conversation"
+                          onClick={e => { e.stopPropagation(); onDeleteConversation(runId) }}
+                        >
+                          🗑
+                        </button>
                       </div>
-                    </div>
-                    <button
-                      className="sidebar-delete"
-                      title="Delete conversation"
-                      aria-label="Delete conversation"
-                      onClick={e => { e.stopPropagation(); onDeleteConversation(rootId) }}
-                    >
-                      🗑
-                    </button>
-                  </div>
-                )
-              })
+                    )
+                  })}
+                </div>
+              ))
           )
         }
       </div>

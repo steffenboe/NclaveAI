@@ -84,6 +84,26 @@ body {
   flex-direction: column;
   gap: 1px;
 }
+.chat-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 0.5rem;
+}
+.chat-group-header {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.5rem 0.6rem 0.3rem;
+  position: sticky;
+  top: 0;
+  background: var(--bg-subtle);
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+}
 .sidebar-item {
   padding: 0.4rem 0.6rem;
   border-radius: var(--radius);
